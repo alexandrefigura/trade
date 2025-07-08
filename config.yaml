@@ -1,0 +1,159 @@
+# Sistema de Trading v5.2 - Configuração Profissional
+# Baseado em recomendações técnicas para produção
+
+# Modo de operação
+debug_mode: false  # Mudar para false em produção
+
+# Trading Principal
+trading:
+  symbol: "BTCUSDT"
+  min_confidence: 0.65  # 65% conforme recomendado
+  max_position_pct: 0.02  # 2% padrão, ajustado dinamicamente
+
+# Análise Técnica
+ta:
+  # RSI - Configurações recomendadas
+  rsi_period: 14  # Período mais longo para estabilidade
+  rsi_buy_threshold: 25  # Sobrevenda clara
+  rsi_sell_threshold: 75  # Sobrecompra clara
+  rsi_confidence: 0.8
+  
+  # Moving Averages
+  sma_short_period: 9
+  sma_long_period: 21  # Período mais longo
+  ema_short_period: 9
+  ema_long_period: 21
+  sma_cross_confidence: 0.75
+  
+  # Bollinger Bands
+  bb_period: 20
+  bb_std_dev: 2.0
+  bb_confidence: 0.7
+  
+  # Pattern Detection
+  pattern_confidence: 0.85
+  
+  # Thresholds de decisão
+  buy_threshold: 0.4  # Mais conservador
+  sell_threshold: 0.4
+
+# Análise de Orderbook
+orderbook:
+  imbalance_threshold: 0.90  # 90% conforme recomendado
+  min_cycles_before_trade: 3  # Delay mínimo
+  depth_levels: 20
+  
+# Pesos dos Sinais - Balanceamento recomendado
+signal_weights:
+  technical: 0.40  # 40%
+  orderbook: 0.40  # 40%
+  ml: 0.20        # 20%
+
+# Gestão de Risco - CRÍTICO
+risk:
+  # Stop Loss e Take Profit
+  stop_loss_pct: 0.015  # 1.5%
+  take_profit_pct: 0.025  # 2.5% (relação 1.67:1)
+  trailing_stop_pct: 0.01  # 1% trailing
+  
+  # Volatilidade e Posicionamento
+  max_volatility: 0.05  # 5% máximo
+  volatility_thresholds:
+    low: 0.01  # 1%
+    high: 0.03  # 3%
+  
+  # Tamanho dinâmico de posição
+  position_sizing:
+    low_volatility_pct: 0.05  # 5% quando calmo
+    normal_volatility_pct: 0.02  # 2% normal
+    high_volatility_pct: 0.01  # 1% quando volátil
+  
+  # Proteções adicionais
+  max_daily_loss: 0.02  # 2% stop diário
+  max_drawdown: 0.10  # 10% drawdown máximo
+  min_volume_24h: 1000000  # $1M volume mínimo
+
+# Filtros de Mercado
+filters:
+  min_volume_multiplier: 1.5  # Volume 50% acima da média
+  max_spread_bps: 20  # 20 basis points máximo
+  max_recent_volatility: 0.03  # 3% volatilidade recente
+
+# Machine Learning
+ml:
+  enabled: true
+  retrain_period_days: 14  # Retreinar a cada 2 semanas
+  min_accuracy: 0.55  # 55% precisão mínima
+  features:
+    - rsi
+    - volume_ratio
+    - atr
+    - momentum
+    - volatility
+    - spread_bps
+    - orderbook_imbalance
+  
+# Performance e Timing
+performance:
+  ta_interval_ms: 5000  # Análise a cada 5s
+  main_loop_interval_ms: 1000  # Loop principal 1s
+  orderbook_update_ms: 100  # Orderbook 100ms
+  
+# Cache e Infraestrutura
+infrastructure:
+  use_redis: true
+  redis_host: "localhost"
+  redis_port: 6379
+  redis_timeout: 5
+  websocket_reconnect_delay: 5
+  max_reconnect_attempts: 10
+
+# Sistema de Alertas
+alerts:
+  enabled: true
+  channels:
+    telegram:
+      enabled: true
+      bot_token: "${TELEGRAM_BOT_TOKEN}"  # Usar variável de ambiente
+      chat_id: "${TELEGRAM_CHAT_ID}"
+      alert_types:
+        - trade_opened
+        - trade_closed
+        - stop_loss_hit
+        - daily_summary
+        - errors
+    email:
+      enabled: false
+      smtp_server: "smtp.gmail.com"
+      smtp_port: 587
+      from_email: "trading@example.com"
+      to_email: "alerts@example.com"
+
+# Validação de Mercado
+market_validation:
+  check_interval: 60  # Verificar a cada 60s
+  required_checks:
+    - volume_above_average
+    - spread_acceptable
+    - volatility_in_range
+    - orderbook_depth_sufficient
+  min_orderbook_depth: 10  # Mínimo 10 níveis
+
+# Configurações de Debug/Desenvolvimento
+debug:
+  force_first_trade: false
+  use_simulated_data: false
+  save_all_signals: true
+  log_orderbook_changes: false
+
+# Backtesting
+backtesting:
+  default_period_days: 30
+  commission_pct: 0.001  # 0.1% por trade
+  slippage_pct: 0.0005  # 0.05% slippage
+  
+# Checkpoints e Recovery
+checkpoint:
+  interval_seconds: 300  # Salvar a cada 5 min
+  max_checkpoints: 10
+  compression: true

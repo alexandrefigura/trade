@@ -1,0 +1,25 @@
+venv\Scripts\activate.bat
+
+pip install -e .
+
+pip install -r requirements.txt
+
+trade-system config --create  (se existir por como Não)
+
+# Ver a configuração atual
+trade-system config --show
+
+Ai você ve as configurações e soclhe um desses:
+Modo Debug (RECOMENDADO para começar)
+	trade-system paper --debug
+👍 Vai gerar mais sinais para você ver o sistema funcionando
+
+Opção 2 - Modo Normal:
+	trade-system paper
+👍 Parâmetros conservadores (poucos sinais, mais qualidade)
+
+Com balance personalizado:
+	trade-system paper --debug --balance 5000
+
+
+Se precisar: fix_cli.py serve para corrigir problemas do paper mode, so executar ele que ele corrige

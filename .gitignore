@@ -1,0 +1,81 @@
+# Ambiente Virtual
+venv/
+env/
+ENV/
+.venv/
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Checkpoints e dados temporários
+checkpoints/
+*.checkpoint
+*.ckpt
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.Python
+
+# Arquivos de configuração sensíveis
+.env
+.env.local
+.env.*.local
+config_local.yaml
+credentials.yaml
+secrets.yaml
+
+# API Keys e segredos
+*.key
+*.pem
+*.secret
+
+# Dados de execução
+*.db
+*.sqlite
+*.sqlite3
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Arquivos de teste temporários
+test_*.yaml
+temp_*.py
+diagnostico_sinais_*.txt
+
+# Outputs e relatórios temporários
+output/
+reports/
+*.csv
+*.xlsx
+
+# Jupyter Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
