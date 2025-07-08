@@ -1,195 +1,426 @@
 """
-Gestão de risco ultra-rápida com stops dinâmicos e proteções avançadas
+Gestão de risco avançada com Kelly Criterion otimizado e proteções de drawdown
 """
 import time
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Tuple, Optional, List
 from collections import deque
+from dataclasses import dataclass, field
+from enum import Enum
 from trade_system.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-class UltraFastRiskManager:
-    """Gestão de risco com cálculos otimizados e stops dinâmicos"""
+class TradingState(Enum):
+    """Estados possíveis do sistema de trading"""
+    NORMAL = "NORMAL"
+    CAUTION = "CAUTION"
+    RESTRICTED = "RESTRICTED"
+    KILL_SWITCH = "KILL_SWITCH"
+    EMERGENCY_STOP = "EMERGENCY_STOP"
+
+
+@dataclass
+class KellyParameters:
+    """Parâmetros para cálculo do Kelly Criterion"""
+    win_rate: float = 0.5
+    avg_win: float = 0.0
+    avg_loss: float = 0.0
+    win_loss_ratio: float = 1.5
+    kelly_fraction: float = 0.0
+    kelly_multiplier: float = 0.25  # Fator de segurança (Kelly fracionário)
+    min_kelly: float = 0.01  # Mínimo 1%
+    max_kelly: float = 0.25  # Máximo 25%
+    
+    def calculate(self):
+        """Calcula o Kelly Criterion otimizado"""
+        if self.win_rate <= 0 or self.win_loss_ratio <= 0:
+            self.kelly_fraction = self.min_kelly
+            return
+        
+        # Fórmula clássica do Kelly
+        # f = p - q/b
+        # onde: p = probabilidade de ganho, q = probabilidade de perda, b = ratio ganho/perda
+        q = 1 - self.win_rate
+        kelly = self.win_rate - (q / self.win_loss_ratio)
+        
+        # Aplicar fator de segurança (Kelly fracionário)
+        kelly *= self.kelly_multiplier
+        
+        # Aplicar limites
+        self.kelly_fraction = max(self.min_kelly, min(kelly, self.max_kelly))
+        
+        return self.kelly_fraction
+
+
+@dataclass
+class DrawdownProtection:
+    """Sistema de proteção contra drawdown"""
+    max_daily_drawdown: float = 0.02  # 2%
+    max_weekly_drawdown: float = 0.05  # 5%
+    max_monthly_drawdown: float = 0.10  # 10%
+    max_absolute_drawdown: float = 0.15  # 15%
+    
+    # Kill switches
+    daily_loss_kill_switch: float = 0.03  # 3% perda diária = kill switch
+    consecutive_losses_kill_switch: int = 5  # 5 perdas consecutivas
+    rapid_drawdown_threshold: float = 0.05  # 5% em 1 hora
+    
+    # Estados
+    current_state: TradingState = field(default=TradingState.NORMAL)
+    kill_switch_activated: bool = field(default=False)
+    kill_switch_timestamp: Optional[datetime] = field(default=None)
+    kill_switch_reason: str = field(default="")
+    
+    # Cooldown
+    kill_switch_cooldown_hours: int = 24
+    state_transition_cooldown_minutes: int = 30
+
+
+class AdvancedRiskManager:
+    """Sistema avançado de gestão de risco com Kelly Criterion e Kill Switch"""
     
     def __init__(self, config):
         self.config = config
         self.current_balance = 10000.0
         self.initial_balance = 10000.0
-        self.daily_pnl = 0.0
+        self.daily_starting_balance = 10000.0
+        self.weekly_starting_balance = 10000.0
+        self.monthly_starting_balance = 10000.0
+        
+        # Kelly Criterion
+        self.kelly_params = KellyParameters()
+        
+        # Proteção de Drawdown
+        self.drawdown_protection = DrawdownProtection(
+            max_daily_drawdown=getattr(config, 'max_daily_drawdown', 0.02),
+            max_weekly_drawdown=getattr(config, 'max_weekly_drawdown', 0.05),
+            max_monthly_drawdown=getattr(config, 'max_monthly_drawdown', 0.10),
+            daily_loss_kill_switch=getattr(config, 'daily_loss_kill_switch', 0.03),
+            consecutive_losses_kill_switch=getattr(config, 'max_consecutive_losses', 5)
+        )
+        
+        # Históricos
+        self.trade_history = deque(maxlen=1000)
+        self.balance_history = deque(maxlen=10000)
+        self.pnl_history = deque(maxlen=1000)
+        self.kelly_history = deque(maxlen=100)
+        self.state_history = deque(maxlen=100)
+        
+        # Métricas em tempo real
         self.position_info = None
-        
-        # Histórico
-        self.pnl_history = np.zeros(1000, dtype=np.float32)
-        self.pnl_index = 0
-        self.trade_history = deque(maxlen=100)
-        
-        # Métricas
-        self.total_fees_paid = 0.0
-        self.peak_balance = 10000.0
-        self.drawdown_start = None
-        self.max_drawdown = 0.0
-        self.daily_trades = 0
-        self.last_reset_day = datetime.now().date()
-        
-        # Consecutive losses tracking
+        self.daily_pnl = 0.0
+        self.weekly_pnl = 0.0
+        self.monthly_pnl = 0.0
         self.consecutive_losses = 0
-        self.max_consecutive_losses = getattr(config, 'max_consecutive_losses', 3)
+        self.peak_balance = 10000.0
+        self.total_fees_paid = 0.0
         
-        # Position management
-        self.max_position_value = None
-        self.max_positions = 1
-        self.current_positions = 0
+        # Controle de tempo
+        self.last_daily_reset = datetime.now()
+        self.last_weekly_reset = datetime.now()
+        self.last_monthly_reset = datetime.now()
+        self.last_state_change = datetime.now()
         
-        # Dynamic risk parameters
-        self.base_risk_pct = config.max_position_pct
-        self.current_risk_pct = self.base_risk_pct
+        # Risk scoring
+        self.risk_score = 0
+        self.risk_factors = {}
         
-        logger.info(f"💰 Risk Manager inicializado - Balance: ${self.current_balance:,.2f}")
+        # Performance tracking para Kelly
+        self.winning_trades = deque(maxlen=100)
+        self.losing_trades = deque(maxlen=100)
+        
+        logger.info(f"💰 Advanced Risk Manager inicializado - Balance: ${self.current_balance:,.2f}")
+        logger.info(f"🛡️ Proteções: Daily DD {self.drawdown_protection.max_daily_drawdown*100:.1f}%, "
+                   f"Kill Switch {self.drawdown_protection.daily_loss_kill_switch*100:.1f}%")
     
     def calculate_position_size(
         self,
         confidence: float,
         volatility: float,
-        current_price: Optional[float] = None
+        current_price: Optional[float] = None,
+        market_conditions: Optional[Dict] = None
     ) -> float:
         """
-        Cálculo dinâmico do tamanho da posição com Kelly Criterion
+        Cálculo avançado de tamanho de posição usando Kelly Criterion
         """
-        # Reset diário
-        self._check_daily_reset()
-        
-        # Verificar limites
-        if not self._check_risk_limits():
+        # Verificar kill switch primeiro
+        if self.drawdown_protection.kill_switch_activated:
+            logger.warning("🚨 Kill switch ativo - trading bloqueado")
             return 0.0
         
-        # Ajustar risco por performance
-        self._adjust_risk_by_performance()
+        # Reset periódico
+        self._check_periodic_resets()
         
-        # Kelly Criterion modificado
-        win_rate = self._calculate_win_rate()
-        avg_win_loss_ratio = self._calculate_win_loss_ratio()
+        # Verificar estado do sistema
+        current_state = self._evaluate_trading_state()
+        if current_state == TradingState.KILL_SWITCH:
+            return 0.0
         
-        if win_rate > 0 and avg_win_loss_ratio > 0:
-            kelly_fraction = (win_rate * avg_win_loss_ratio - (1 - win_rate)) / avg_win_loss_ratio
-            kelly_fraction = max(0, min(kelly_fraction, 0.25))  # Cap em 25%
-        else:
-            kelly_fraction = 0.1  # Default 10%
+        # Atualizar Kelly Criterion
+        self._update_kelly_parameters()
+        kelly_fraction = self.kelly_params.calculate()
         
-        # Ajustar por confiança
-        confidence_factor = self._calculate_confidence_factor(confidence)
-        position_pct = kelly_fraction * confidence_factor * self.current_risk_pct
+        # Base position size com Kelly
+        base_position_pct = kelly_fraction
         
-        # Ajustar por volatilidade
-        volatility_factor = self._calculate_volatility_factor(volatility)
-        position_pct *= volatility_factor
+        # Ajustes por estado do sistema
+        state_multiplier = self._get_state_multiplier(current_state)
+        base_position_pct *= state_multiplier
         
-        # Ajustar por drawdown
-        drawdown_factor = self._calculate_drawdown_factor()
-        position_pct *= drawdown_factor
+        # Ajuste por confiança (não-linear)
+        confidence_multiplier = self._calculate_confidence_multiplier(confidence)
+        position_pct = base_position_pct * confidence_multiplier
         
-        # Calcular valor
+        # Ajuste por volatilidade
+        volatility_multiplier = self._calculate_volatility_multiplier(volatility)
+        position_pct *= volatility_multiplier
+        
+        # Ajuste por condições de mercado
+        if market_conditions:
+            market_multiplier = self._calculate_market_multiplier(market_conditions)
+            position_pct *= market_multiplier
+        
+        # Ajuste por drawdown atual
+        drawdown_multiplier = self._calculate_drawdown_multiplier()
+        position_pct *= drawdown_multiplier
+        
+        # Aplicar limites absolutos
+        position_pct = self._apply_position_limits(position_pct, current_state)
+        
+        # Calcular valor da posição
         position_value = self.current_balance * position_pct
         
-        # Aplicar limites
-        position_value = self._apply_position_limits(position_value)
+        # Verificar limites mínimos
+        min_position = getattr(self.config, 'min_position_value', 50.0)
+        if position_value < min_position:
+            return 0.0
         
-        # Log
+        # Registrar no histórico
+        self.kelly_history.append({
+            'timestamp': datetime.now(),
+            'kelly_fraction': kelly_fraction,
+            'final_position_pct': position_pct,
+            'confidence': confidence,
+            'volatility': volatility,
+            'state': current_state.value
+        })
+        
+        # Log detalhado
         if current_price and position_value > 0:
             quantity = position_value / current_price
             logger.info(f"""
-📊 Posição calculada:
-- Valor: ${position_value:.2f} ({position_pct*100:.1f}%)
+📊 Posição calculada (Kelly Criterion):
+- Kelly: {kelly_fraction*100:.2f}% (Win rate: {self.kelly_params.win_rate*100:.1f}%, W/L: {self.kelly_params.win_loss_ratio:.2f})
+- Estado: {current_state.value} (mult: {state_multiplier:.2f})
+- Posição final: ${position_value:.2f} ({position_pct*100:.2f}%)
 - Quantidade: {quantity:.6f} @ ${current_price:.2f}
-- Win rate: {win_rate*100:.1f}%
-- Kelly: {kelly_fraction*100:.1f}%
-- Volatilidade: {volatility*100:.2f}%
+- Risk Score: {self.risk_score}/100
             """)
         
         return position_value
     
-    def _calculate_win_rate(self) -> float:
-        """Calcula taxa de acerto histórica"""
-        if len(self.trade_history) < 5:
-            return 0.5  # Default 50%
-        
-        wins = sum(1 for trade in self.trade_history if trade['pnl'] > 0)
-        return wins / len(self.trade_history)
-    
-    def _calculate_win_loss_ratio(self) -> float:
-        """Calcula ratio médio ganho/perda"""
-        if len(self.trade_history) < 5:
-            return 1.5  # Default 1.5:1
-        
-        wins = [t['pnl'] for t in self.trade_history if t['pnl'] > 0]
-        losses = [abs(t['pnl']) for t in self.trade_history if t['pnl'] < 0]
-        
-        if wins and losses:
-            return np.mean(wins) / np.mean(losses)
-        return 1.5
-    
-    def _calculate_confidence_factor(self, confidence: float) -> float:
-        """Ajusta fator baseado na confiança"""
-        # Escala não-linear: penaliza confiança baixa
-        if confidence < 0.6:
-            return confidence * 0.5
-        elif confidence < 0.7:
-            return confidence * 0.8
-        elif confidence < 0.8:
-            return confidence
-        else:
-            return confidence * 1.1  # Boost para alta confiança
-    
-    def _calculate_volatility_factor(self, volatility: float) -> float:
-        """Fator de ajuste por volatilidade"""
-        if volatility < 0.005:  # Muito baixa
-            return 1.3
-        elif volatility < 0.01:  # Baixa
-            return 1.2
-        elif volatility < 0.02:  # Normal
-            return 1.0
-        elif volatility < 0.03:  # Alta
-            return 0.7
-        elif volatility < 0.04:  # Muito alta
-            return 0.5
-        else:  # Extrema
-            return 0.3
-    
-    def _calculate_drawdown_factor(self) -> float:
-        """Reduz tamanho em drawdown"""
-        current_dd = self._get_current_drawdown()
-        
-        if current_dd < 0.02:  # < 2%
-            return 1.0
-        elif current_dd < 0.05:  # < 5%
-            return 0.8
-        elif current_dd < 0.08:  # < 8%
-            return 0.6
-        else:  # > 8%
-            return 0.4
-    
-    def _adjust_risk_by_performance(self):
-        """Ajusta risco baseado em performance recente"""
-        if len(self.trade_history) < 10:
+    def _update_kelly_parameters(self):
+        """Atualiza parâmetros do Kelly Criterion baseado no histórico"""
+        if len(self.winning_trades) < 5 or len(self.losing_trades) < 3:
+            # Poucos dados, usar valores conservadores
+            self.kelly_params.win_rate = 0.5
+            self.kelly_params.win_loss_ratio = 1.5
             return
         
-        recent_trades = list(self.trade_history)[-10:]
-        recent_pnl = sum(t['pnl'] for t in recent_trades)
+        # Calcular win rate
+        total_trades = len(self.winning_trades) + len(self.losing_trades)
+        self.kelly_params.win_rate = len(self.winning_trades) / total_trades
         
-        if recent_pnl > 0:
-            # Performance positiva: aumentar risco gradualmente
-            self.current_risk_pct = min(
-                self.base_risk_pct * 1.2,
-                self.current_risk_pct * 1.05
-            )
+        # Calcular médias
+        avg_win = np.mean(list(self.winning_trades)) if self.winning_trades else 0
+        avg_loss = abs(np.mean(list(self.losing_trades))) if self.losing_trades else 1
+        
+        self.kelly_params.avg_win = avg_win
+        self.kelly_params.avg_loss = avg_loss
+        self.kelly_params.win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 1.5
+        
+        # Ajustar multiplicador baseado em volatilidade dos resultados
+        if len(self.trade_history) > 20:
+            returns = [t['pnl_pct'] for t in list(self.trade_history)[-20:]]
+            return_std = np.std(returns)
+            
+            # Maior volatilidade = menor multiplicador Kelly
+            if return_std > 0.03:  # Alta volatilidade
+                self.kelly_params.kelly_multiplier = 0.15
+            elif return_std > 0.02:
+                self.kelly_params.kelly_multiplier = 0.20
+            else:
+                self.kelly_params.kelly_multiplier = 0.25
+    
+    def _evaluate_trading_state(self) -> TradingState:
+        """Avalia e atualiza o estado do sistema de trading"""
+        # Calcular métricas atuais
+        daily_drawdown = (self.daily_starting_balance - self.current_balance) / self.daily_starting_balance
+        weekly_drawdown = (self.weekly_starting_balance - self.current_balance) / self.weekly_starting_balance
+        current_drawdown = (self.peak_balance - self.current_balance) / self.peak_balance
+        
+        # Verificar kill switches
+        if daily_drawdown > self.drawdown_protection.daily_loss_kill_switch:
+            self._activate_kill_switch(f"Perda diária excedeu limite: {daily_drawdown*100:.1f}%")
+            return TradingState.KILL_SWITCH
+        
+        if self.consecutive_losses >= self.drawdown_protection.consecutive_losses_kill_switch:
+            self._activate_kill_switch(f"Perdas consecutivas: {self.consecutive_losses}")
+            return TradingState.KILL_SWITCH
+        
+        # Verificar drawdown rápido (1 hora)
+        if self._check_rapid_drawdown():
+            self._activate_kill_switch("Drawdown rápido detectado")
+            return TradingState.KILL_SWITCH
+        
+        # Determinar estado baseado em drawdown
+        if current_drawdown > self.drawdown_protection.max_absolute_drawdown:
+            return TradingState.EMERGENCY_STOP
+        elif daily_drawdown > self.drawdown_protection.max_daily_drawdown * 0.8:
+            return TradingState.RESTRICTED
+        elif weekly_drawdown > self.drawdown_protection.max_weekly_drawdown * 0.7:
+            return TradingState.CAUTION
         else:
-            # Performance negativa: reduzir risco
-            self.current_risk_pct = max(
-                self.base_risk_pct * 0.5,
-                self.current_risk_pct * 0.95
-            )
+            return TradingState.NORMAL
+    
+    def _activate_kill_switch(self, reason: str):
+        """Ativa o kill switch do sistema"""
+        if not self.drawdown_protection.kill_switch_activated:
+            self.drawdown_protection.kill_switch_activated = True
+            self.drawdown_protection.kill_switch_timestamp = datetime.now()
+            self.drawdown_protection.kill_switch_reason = reason
+            self.drawdown_protection.current_state = TradingState.KILL_SWITCH
+            
+            logger.critical(f"""
+🚨🚨🚨 KILL SWITCH ATIVADO 🚨🚨🚨
+Razão: {reason}
+Balance: ${self.current_balance:.2f}
+P&L Diário: ${self.daily_pnl:.2f}
+Cooldown: {self.drawdown_protection.kill_switch_cooldown_hours}h
+            """)
+            
+            # Registrar no histórico
+            self.state_history.append({
+                'timestamp': datetime.now(),
+                'state': TradingState.KILL_SWITCH,
+                'reason': reason,
+                'balance': self.current_balance,
+                'daily_pnl': self.daily_pnl
+            })
+    
+    def _check_rapid_drawdown(self) -> bool:
+        """Verifica se houve drawdown rápido (1 hora)"""
+        if len(self.balance_history) < 60:  # Menos de 1 hora de dados
+            return False
+        
+        balance_1h_ago = list(self.balance_history)[-60]
+        rapid_drawdown = (balance_1h_ago - self.current_balance) / balance_1h_ago
+        
+        return rapid_drawdown > self.drawdown_protection.rapid_drawdown_threshold
+    
+    def _get_state_multiplier(self, state: TradingState) -> float:
+        """Retorna multiplicador baseado no estado do sistema"""
+        multipliers = {
+            TradingState.NORMAL: 1.0,
+            TradingState.CAUTION: 0.7,
+            TradingState.RESTRICTED: 0.3,
+            TradingState.KILL_SWITCH: 0.0,
+            TradingState.EMERGENCY_STOP: 0.0
+        }
+        return multipliers.get(state, 0.5)
+    
+    def _calculate_confidence_multiplier(self, confidence: float) -> float:
+        """Multiplicador não-linear baseado em confiança"""
+        if confidence < 0.5:
+            return 0.3
+        elif confidence < 0.6:
+            return 0.5
+        elif confidence < 0.7:
+            return 0.7
+        elif confidence < 0.8:
+            return 0.9
+        elif confidence < 0.9:
+            return 1.1
+        else:
+            return 1.2
+    
+    def _calculate_volatility_multiplier(self, volatility: float) -> float:
+        """Ajusta por volatilidade usando limites dinâmicos"""
+        # Volatilidade adaptativa baseada em histórico
+        if hasattr(self, 'volatility_history') and len(self.volatility_history) > 20:
+            avg_vol = np.mean(list(self.volatility_history)[-20:])
+            vol_std = np.std(list(self.volatility_history)[-20:])
+            
+            # Z-score da volatilidade atual
+            z_score = (volatility - avg_vol) / vol_std if vol_std > 0 else 0
+            
+            if z_score > 2:  # Muito acima da média
+                return 0.3
+            elif z_score > 1:
+                return 0.6
+            elif z_score < -1:  # Muito abaixo da média
+                return 1.3
+            else:
+                return 1.0
+        else:
+            # Fallback para limites fixos
+            if volatility > 0.04:
+                return 0.3
+            elif volatility > 0.03:
+                return 0.5
+            elif volatility > 0.02:
+                return 0.7
+            elif volatility > 0.01:
+                return 1.0
+            else:
+                return 1.2
+    
+    def _calculate_market_multiplier(self, market_conditions: Dict) -> float:
+        """Ajusta baseado em condições de mercado"""
+        score = market_conditions.get('score', 100)
+        
+        if score >= 90:
+            return 1.1
+        elif score >= 80:
+            return 1.0
+        elif score >= 70:
+            return 0.8
+        elif score >= 60:
+            return 0.6
+        else:
+            return 0.3
+    
+    def _calculate_drawdown_multiplier(self) -> float:
+        """Reduz exposição progressivamente com drawdown"""
+        current_dd = (self.peak_balance - self.current_balance) / self.peak_balance
+        
+        if current_dd < 0.02:
+            return 1.0
+        elif current_dd < 0.05:
+            return 0.8
+        elif current_dd < 0.08:
+            return 0.6
+        elif current_dd < 0.10:
+            return 0.4
+        else:
+            return 0.2
+    
+    def _apply_position_limits(self, position_pct: float, state: TradingState) -> float:
+        """Aplica limites baseados no estado"""
+        # Limites por estado
+        state_limits = {
+            TradingState.NORMAL: 0.10,  # 10% máximo
+            TradingState.CAUTION: 0.05,  # 5% máximo
+            TradingState.RESTRICTED: 0.02,  # 2% máximo
+            TradingState.KILL_SWITCH: 0.0,
+            TradingState.EMERGENCY_STOP: 0.0
+        }
+        
+        max_allowed = state_limits.get(state, 0.05)
+        return min(position_pct, max_allowed)
     
     def should_close_position(
         self,
@@ -198,297 +429,350 @@ class UltraFastRiskManager:
         side: str = 'BUY'
     ) -> Tuple[bool, str]:
         """
-        Sistema avançado de stops com múltiplas condições
+        Sistema avançado de stops com proteções adicionais
         """
         if self.position_info is None:
             return False, ""
         
-        # Converter timestamps
-        entry_time = self.position_info.get('entry_timestamp', time.time())
-        if isinstance(entry_time, datetime):
-            entry_time = entry_time.timestamp()
+        # Kill switch fecha todas as posições
+        if self.drawdown_protection.kill_switch_activated:
+            return True, "KILL SWITCH ATIVO"
         
+        # Estado de emergência fecha posições perdedoras
+        current_state = self._evaluate_trading_state()
+        if current_state == TradingState.EMERGENCY_STOP:
+            pnl_pct = self._calculate_pnl_pct(current_price, entry_price, side)
+            if pnl_pct < 0:
+                return True, "EMERGENCY STOP - Fechando posições perdedoras"
+        
+        # Sistema de stops padrão (melhorado)
+        return self._evaluate_standard_stops(current_price, entry_price, side)
+    
+    def _evaluate_standard_stops(
+        self,
+        current_price: float,
+        entry_price: float,
+        side: str
+    ) -> Tuple[bool, str]:
+        """Avalia stops padrão com melhorias"""
         # Calcular P&L
-        if side == 'BUY':
-            pnl_pct = (current_price - entry_price) / entry_price
-        else:
-            pnl_pct = (entry_price - current_price) / entry_price
+        pnl_pct = self._calculate_pnl_pct(current_price, entry_price, side)
         
         # Atualizar máximos
         if pnl_pct > self.position_info.get('highest_pnl', 0):
             self.position_info['highest_pnl'] = pnl_pct
         
-        # 1. Stop Loss Dinâmico
+        # Stop loss dinâmico baseado em volatilidade e Kelly
         volatility = self.position_info.get('volatility', 0.01)
-        stop_loss = self._calculate_dynamic_stop_loss(volatility)
+        kelly_fraction = self.kelly_params.kelly_fraction
         
-        if pnl_pct < -stop_loss:
-            return True, f"Stop Loss ({stop_loss*100:.1f}%)"
+        # Stop mais apertado quando Kelly baixo (menos edge)
+        stop_multiplier = 2.0 - (kelly_fraction / self.kelly_params.max_kelly)
+        base_stop = getattr(self.config, 'stop_loss_pct', 0.015)
+        dynamic_stop = base_stop * stop_multiplier * (1 + volatility * 10)
         
-        # 2. Take Profit Dinâmico
-        take_profit = self._calculate_dynamic_take_profit(volatility)
+        if pnl_pct < -dynamic_stop:
+            return True, f"Stop Loss Dinâmico ({dynamic_stop*100:.1f}%)"
         
-        if pnl_pct > take_profit:
-            return True, f"Take Profit ({take_profit*100:.1f}%)"
+        # Take profit dinâmico baseado em Kelly
+        base_tp = getattr(self.config, 'take_profit_pct', 0.025)
         
-        # 3. Trailing Stop Avançado
-        if self.config.enable_trailing and pnl_pct > self.config.trailing_activation:
-            trailing_stop = self._calculate_trailing_stop(pnl_pct)
+        # TP maior quando Kelly alto (mais edge)
+        tp_multiplier = 0.5 + (kelly_fraction / self.kelly_params.max_kelly) * 1.5
+        dynamic_tp = base_tp * tp_multiplier * (1 + volatility * 5)
+        
+        if pnl_pct > dynamic_tp:
+            return True, f"Take Profit Dinâmico ({dynamic_tp*100:.1f}%)"
+        
+        # Trailing stop progressivo
+        if pnl_pct > 0.01:  # Ativação em 1%
+            highest_pnl = self.position_info.get('highest_pnl', pnl_pct)
             
-            if pnl_pct < trailing_stop:
-                return True, f"Trailing Stop ({trailing_stop*100:.1f}%)"
+            # Trailing mais agressivo baseado no lucro
+            if highest_pnl > 0.05:
+                keep_ratio = 0.85
+            elif highest_pnl > 0.03:
+                keep_ratio = 0.75
+            elif highest_pnl > 0.02:
+                keep_ratio = 0.65
+            else:
+                keep_ratio = 0.50
+            
+            trailing_level = highest_pnl * keep_ratio
+            
+            if pnl_pct < trailing_level:
+                return True, f"Trailing Stop ({trailing_level*100:.1f}%)"
         
-        # 4. Time-based stops
-        position_duration = time.time() - entry_time
+        # Time-based stops
+        position_duration = time.time() - self.position_info.get('entry_timestamp', time.time())
         
-        # Breakeven após X tempo
-        if position_duration > self.config.breakeven_time and pnl_pct < 0.001:
-            return True, f"Breakeven ({self.config.breakeven_time/60:.0f}min)"
+        # Breakeven mais agressivo em estados restritivos
+        current_state = self._evaluate_trading_state()
+        if current_state in [TradingState.CAUTION, TradingState.RESTRICTED]:
+            if position_duration > 300 and pnl_pct < 0.002:  # 5 min
+                return True, "Breakeven (Estado Restritivo)"
         
         # Stop por tempo máximo
-        if position_duration > self.config.max_position_duration:
-            return True, f"Time limit ({self.config.max_position_duration/3600:.1f}h)"
-        
-        # 5. Volatility spike stop
-        current_volatility = self._estimate_current_volatility(current_price)
-        if current_volatility > volatility * 2:
-            return True, "Volatility spike"
-        
-        # 6. Drawdown protection
-        if self._get_current_drawdown() > self.config.max_drawdown * 0.5:
-            if pnl_pct < 0:
-                return True, "Drawdown protection"
+        max_duration = getattr(self.config, 'max_position_duration', 14400)  # 4h
+        if position_duration > max_duration:
+            return True, f"Tempo máximo ({max_duration/3600:.1f}h)"
         
         return False, ""
     
-    def _calculate_dynamic_stop_loss(self, volatility: float) -> float:
-        """Stop loss baseado em volatilidade"""
-        base_stop = self.config.stop_loss_base
-        
-        # Ajustar por volatilidade
-        if volatility < 0.01:
-            return base_stop * 0.8  # Stop mais apertado
-        elif volatility < 0.02:
-            return base_stop
-        elif volatility < 0.03:
-            return base_stop * 1.5
+    def _calculate_pnl_pct(self, current_price: float, entry_price: float, side: str) -> float:
+        """Calcula P&L percentual"""
+        if side == 'BUY':
+            return (current_price - entry_price) / entry_price
         else:
-            return base_stop * 2.0  # Stop mais largo
-    
-    def _calculate_dynamic_take_profit(self, volatility: float) -> float:
-        """Take profit baseado em volatilidade"""
-        base_tp = self.config.take_profit_base
-        
-        # Ajustar por volatilidade
-        if volatility < 0.01:
-            return base_tp * 0.8
-        elif volatility < 0.02:
-            return base_tp
-        elif volatility < 0.03:
-            return base_tp * 1.5
-        else:
-            return base_tp * 2.0
-    
-    def _calculate_trailing_stop(self, current_pnl: float) -> float:
-        """Trailing stop progressivo"""
-        highest_pnl = self.position_info.get('highest_pnl', current_pnl)
-        
-        # Quanto maior o lucro, mais apertado o trailing
-        if highest_pnl > 0.05:  # > 5%
-            keep_ratio = 0.8  # Manter 80%
-        elif highest_pnl > 0.03:  # > 3%
-            keep_ratio = 0.7  # Manter 70%
-        elif highest_pnl > 0.02:  # > 2%
-            keep_ratio = 0.6  # Manter 60%
-        else:
-            keep_ratio = 0.5  # Manter 50%
-        
-        return highest_pnl * keep_ratio
-    
-    def _estimate_current_volatility(self, current_price: float) -> float:
-        """Estima volatilidade atual"""
-        # Implementação simplificada
-        if hasattr(self, '_price_history'):
-            recent_prices = list(self._price_history)[-20:]
-            if len(recent_prices) > 5:
-                return np.std(recent_prices) / np.mean(recent_prices)
-        return 0.01  # Default
-    
-    def _check_risk_limits(self) -> bool:
-        """Verifica todos os limites de risco"""
-        # Stop loss diário
-        if self.daily_pnl < -self.config.max_daily_loss * self.current_balance:
-            logger.warning(f"🛑 Stop loss diário: ${self.daily_pnl:.2f}")
-            return False
-        
-        # Perdas consecutivas
-        if self.consecutive_losses >= self.max_consecutive_losses:
-            logger.warning(f"🛑 Máximo de perdas consecutivas: {self.consecutive_losses}")
-            return False
-        
-        # Drawdown máximo
-        if self._get_current_drawdown() > self.config.max_drawdown:
-            logger.warning(f"🛑 Drawdown máximo: {self._get_current_drawdown()*100:.1f}%")
-            return False
-        
-        # Balance mínimo
-        if self.current_balance < 100:
-            logger.warning(f"🛑 Balance insuficiente: ${self.current_balance:.2f}")
-            return False
-        
-        return True
-    
-    def _get_current_drawdown(self) -> float:
-        """Calcula drawdown atual"""
-        if self.peak_balance > 0:
-            return (self.peak_balance - self.current_balance) / self.peak_balance
-        return 0.0
-    
-    def _apply_position_limits(self, position_value: float) -> float:
-        """Aplica limites ao tamanho da posição"""
-        # Mínimo
-        min_position = 50.0
-        if position_value < min_position:
-            return 0.0
-        
-        # Máximo absoluto
-        max_allowed = self.current_balance * 0.1  # 10% máximo
-        position_value = min(position_value, max_allowed)
-        
-        # Máximo por volatilidade
-        if hasattr(self, 'current_volatility'):
-            if self.current_volatility > 0.03:
-                position_value = min(position_value, self.current_balance * 0.05)
-        
-        return position_value
+            return (entry_price - current_price) / entry_price
     
     def update_pnl(self, pnl: float, fees: float = 0):
-        """Atualiza P&L e métricas"""
+        """Atualiza P&L e métricas com tracking avançado"""
+        # Atualizar balanços
         self.daily_pnl += pnl
+        self.weekly_pnl += pnl
+        self.monthly_pnl += pnl
         self.current_balance += pnl
         self.total_fees_paid += fees
         
-        # Histórico
-        idx = self.pnl_index % 1000
-        self.pnl_history[idx] = pnl
-        self.pnl_index += 1
+        # Atualizar históricos
+        self.balance_history.append(self.current_balance)
+        self.pnl_history.append(pnl)
         
-        # Trade history
+        # Trade tracking
         if self.position_info:
+            pnl_pct = pnl / (self.position_info.get('position_value', 1))
+            
             trade_record = {
                 'pnl': pnl,
+                'pnl_pct': pnl_pct,
                 'fees': fees,
                 'balance': self.current_balance,
-                'timestamp': time.time()
+                'timestamp': datetime.now(),
+                'state': self.drawdown_protection.current_state.value
             }
             self.trade_history.append(trade_record)
             
-            # Consecutive losses
-            if pnl < 0:
-                self.consecutive_losses += 1
-            else:
+            # Atualizar win/loss tracking
+            if pnl > 0:
+                self.winning_trades.append(pnl_pct)
                 self.consecutive_losses = 0
+            else:
+                self.losing_trades.append(pnl_pct)
+                self.consecutive_losses += 1
         
-        # Peak e drawdown
+        # Atualizar peak e drawdown
         if self.current_balance > self.peak_balance:
             self.peak_balance = self.current_balance
-            self.drawdown_start = None
-        else:
-            if self.drawdown_start is None:
-                self.drawdown_start = datetime.now()
-            current_drawdown = self._get_current_drawdown()
-            self.max_drawdown = max(self.max_drawdown, current_drawdown)
+        
+        # Verificar estado após atualização
+        new_state = self._evaluate_trading_state()
+        if new_state != self.drawdown_protection.current_state:
+            old_state = self.drawdown_protection.current_state
+            self.drawdown_protection.current_state = new_state
+            logger.warning(f"🔄 Mudança de estado: {old_state.value} → {new_state.value}")
     
-    def _check_daily_reset(self):
-        """Reset diário de métricas"""
-        current_day = datetime.now().date()
-        if current_day > self.last_reset_day:
-            logger.info(f"📅 Novo dia - Reset de métricas")
+    def _check_periodic_resets(self):
+        """Reseta métricas periodicamente"""
+        now = datetime.now()
+        
+        # Reset diário
+        if now.date() > self.last_daily_reset.date():
+            logger.info(f"📅 Reset diário - P&L anterior: ${self.daily_pnl:.2f}")
             self.daily_pnl = 0.0
-            self.daily_trades = 0
-            self.last_reset_day = current_day
-            self.consecutive_losses = 0  # Reset no novo dia
+            self.daily_starting_balance = self.current_balance
+            self.last_daily_reset = now
+            self.consecutive_losses = 0
+            
+            # Verificar se pode sair do kill switch
+            if self.drawdown_protection.kill_switch_activated:
+                hours_since = (now - self.drawdown_protection.kill_switch_timestamp).total_seconds() / 3600
+                if hours_since >= self.drawdown_protection.kill_switch_cooldown_hours:
+                    self.drawdown_protection.kill_switch_activated = False
+                    self.drawdown_protection.current_state = TradingState.CAUTION
+                    logger.warning("✅ Kill switch desativado após cooldown")
+        
+        # Reset semanal
+        if now - self.last_weekly_reset > timedelta(days=7):
+            logger.info(f"📅 Reset semanal - P&L: ${self.weekly_pnl:.2f}")
+            self.weekly_pnl = 0.0
+            self.weekly_starting_balance = self.current_balance
+            self.last_weekly_reset = now
+        
+        # Reset mensal
+        if now.month != self.last_monthly_reset.month:
+            logger.info(f"📅 Reset mensal - P&L: ${self.monthly_pnl:.2f}")
+            self.monthly_pnl = 0.0
+            self.monthly_starting_balance = self.current_balance
+            self.last_monthly_reset = now
     
     def get_risk_metrics(self) -> Dict:
         """Retorna métricas detalhadas de risco"""
-        current_drawdown = self._get_current_drawdown()
-        win_rate = self._calculate_win_rate()
+        current_drawdown = (self.peak_balance - self.current_balance) / self.peak_balance
+        daily_drawdown = (self.daily_starting_balance - self.current_balance) / self.daily_starting_balance
+        
+        # Calcular risk score
+        self._calculate_risk_score()
         
         return {
             'current_balance': self.current_balance,
             'daily_pnl': self.daily_pnl,
+            'weekly_pnl': self.weekly_pnl,
+            'monthly_pnl': self.monthly_pnl,
             'total_return': (self.current_balance - self.initial_balance) / self.initial_balance,
-            'max_drawdown': self.max_drawdown,
+            'max_drawdown': max(self.max_drawdown, current_drawdown),
             'current_drawdown': current_drawdown,
+            'daily_drawdown': daily_drawdown,
             'total_fees': self.total_fees_paid,
-            'daily_trades': self.daily_trades,
-            'can_trade': self._check_risk_limits(),
-            'risk_level': self._calculate_risk_level(),
-            'win_rate': win_rate,
             'consecutive_losses': self.consecutive_losses,
-            'current_risk_pct': self.current_risk_pct,
-            'trades_today': self.daily_trades
+            'trading_state': self.drawdown_protection.current_state.value,
+            'kill_switch_active': self.drawdown_protection.kill_switch_activated,
+            'can_trade': self._can_trade(),
+            'risk_score': self.risk_score,
+            'risk_factors': self.risk_factors,
+            'kelly_fraction': self.kelly_params.kelly_fraction,
+            'win_rate': self.kelly_params.win_rate,
+            'win_loss_ratio': self.kelly_params.win_loss_ratio,
+            'position_sizing': {
+                'kelly': self.kelly_params.kelly_fraction,
+                'state_multiplier': self._get_state_multiplier(self.drawdown_protection.current_state),
+                'max_position_pct': self._apply_position_limits(1.0, self.drawdown_protection.current_state)
+            }
         }
     
-    def _calculate_risk_level(self) -> str:
-        """Calcula nível de risco atual"""
+    def _calculate_risk_score(self):
+        """Calcula score de risco detalhado (0-100, onde 100 é máximo risco)"""
         score = 0
+        factors = {}
         
-        # Drawdown
-        dd = self._get_current_drawdown()
-        if dd > 0.08:
-            score += 3
-        elif dd > 0.05:
-            score += 2
-        elif dd > 0.02:
-            score += 1
-        
-        # Daily loss
-        daily_loss_pct = abs(self.daily_pnl / self.current_balance) if self.current_balance > 0 else 0
-        if daily_loss_pct > 0.015:
-            score += 2
-        elif daily_loss_pct > 0.01:
-            score += 1
-        
-        # Consecutive losses
-        if self.consecutive_losses >= 3:
-            score += 2
-        elif self.consecutive_losses >= 2:
-            score += 1
-        
-        # Classificar
-        if score >= 5:
-            return "CRÍTICO"
-        elif score >= 3:
-            return "ALTO"
-        elif score >= 1:
-            return "MÉDIO"
+        # Drawdown (0-30 pontos)
+        current_dd = (self.peak_balance - self.current_balance) / self.peak_balance
+        if current_dd > 0.10:
+            dd_score = 30
+        elif current_dd > 0.05:
+            dd_score = 20
+        elif current_dd > 0.02:
+            dd_score = 10
         else:
-            return "BAIXO"
+            dd_score = 0
+        score += dd_score
+        factors['drawdown'] = dd_score
+        
+        # Perdas consecutivas (0-20 pontos)
+        if self.consecutive_losses >= 5:
+            loss_score = 20
+        elif self.consecutive_losses >= 3:
+            loss_score = 10
+        elif self.consecutive_losses >= 2:
+            loss_score = 5
+        else:
+            loss_score = 0
+        score += loss_score
+        factors['consecutive_losses'] = loss_score
+        
+        # Daily loss (0-25 pontos)
+        daily_loss_pct = abs(self.daily_pnl / self.daily_starting_balance) if self.daily_starting_balance > 0 else 0
+        if daily_loss_pct > 0.02:
+            daily_score = 25
+        elif daily_loss_pct > 0.015:
+            daily_score = 15
+        elif daily_loss_pct > 0.01:
+            daily_score = 10
+        else:
+            daily_score = 0
+        score += daily_score
+        factors['daily_loss'] = daily_score
+        
+        # Win rate baixo (0-15 pontos)
+        if self.kelly_params.win_rate < 0.3:
+            wr_score = 15
+        elif self.kelly_params.win_rate < 0.4:
+            wr_score = 10
+        elif self.kelly_params.win_rate < 0.45:
+            wr_score = 5
+        else:
+            wr_score = 0
+        score += wr_score
+        factors['low_win_rate'] = wr_score
+        
+        # Estado do sistema (0-10 pontos)
+        state_scores = {
+            TradingState.NORMAL: 0,
+            TradingState.CAUTION: 3,
+            TradingState.RESTRICTED: 6,
+            TradingState.KILL_SWITCH: 10,
+            TradingState.EMERGENCY_STOP: 10
+        }
+        state_score = state_scores.get(self.drawdown_protection.current_state, 5)
+        score += state_score
+        factors['system_state'] = state_score
+        
+        self.risk_score = min(score, 100)
+        self.risk_factors = factors
+    
+    def _can_trade(self) -> bool:
+        """Verifica se pode abrir novas posições"""
+        if self.drawdown_protection.kill_switch_activated:
+            return False
+        
+        if self.drawdown_protection.current_state in [TradingState.KILL_SWITCH, TradingState.EMERGENCY_STOP]:
+            return False
+        
+        if self.current_balance < 100:
+            return False
+        
+        return True
     
     def set_position_info(self, position: Dict):
-        """Define informações da posição"""
+        """Define informações da posição com tracking avançado"""
         if position:
-            # Garantir timestamp
-            if 'entry_timestamp' not in position:
-                position['entry_timestamp'] = time.time()
-            
-            # Adicionar campos de controle
-            position['highest_pnl'] = 0
-            position['lowest_pnl'] = 0
-            
-            # Salvar volatilidade atual
-            if 'volatility' not in position:
-                position['volatility'] = 0.01
+            position.update({
+                'entry_timestamp': time.time(),
+                'highest_pnl': 0,
+                'lowest_pnl': 0,
+                'position_value': position.get('size', 0) * position.get('entry_price', 0),
+                'entry_balance': self.current_balance,
+                'entry_state': self.drawdown_protection.current_state.value,
+                'kelly_fraction': self.kelly_params.kelly_fraction
+            })
         
         self.position_info = position
-        self.current_positions = 1 if position else 0
-        self.daily_trades += 1
     
-    def clear_position(self):
-        """Limpa posição"""
-        self.position_info = None
-        self.current_positions = 0
+    def emergency_close_all_positions(self) -> List[str]:
+        """Fecha todas as posições em emergência"""
+        logger.critical("🚨 FECHAMENTO DE EMERGÊNCIA DE TODAS AS POSIÇÕES")
+        
+        positions_to_close = []
+        if self.position_info:
+            positions_to_close.append(self.position_info.get('symbol', 'UNKNOWN'))
+        
+        # Ativar kill switch
+        self._activate_kill_switch("Fechamento de emergência executado")
+        
+        return positions_to_close
+
+
+# Aliases para compatibilidade
+class UltraFastRiskManager(AdvancedRiskManager):
+    """Mantém compatibilidade com código existente"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        # Configurações específicas para compatibilidade
+        if not hasattr(config, 'stop_loss_base'):
+            config.stop_loss_base = getattr(config, 'stop_loss_pct', 0.015)
+        if not hasattr(config, 'take_profit_base'):
+            config.take_profit_base = getattr(config, 'take_profit_pct', 0.025)
+        if not hasattr(config, 'enable_trailing'):
+            config.enable_trailing = True
+        if not hasattr(config, 'trailing_activation'):
+            config.trailing_activation = 0.01
+        if not hasattr(config, 'breakeven_time'):
+            config.breakeven_time = 600  # 10 minutos
+        if not hasattr(config, 'max_position_duration'):
+            config.max_position_duration = 14400  # 4 horas
+        
+        self.max_drawdown = getattr(config, 'max_drawdown', 0.15)
 
 
 class MarketConditionValidator:
