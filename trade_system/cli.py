@@ -66,7 +66,8 @@ async def run_backtest_command(args):
 ╔══════════════════════════════════════════════════════════════╗
 ║                    MODO BACKTEST                             ║
 ╚══════════════════════════════════════════════════════════════╝
-    """)
+    """
+    )
     
     # TODO: Implementar backtest
     print("❌ Backtest ainda não implementado nesta versão modular")
@@ -80,11 +81,12 @@ async def run_paper_trading_command(args):
 ║                  PAPER TRADING MODE                          ║
 ║              Execução simulada com dados reais               ║
 ╚══════════════════════════════════════════════════════════════╝
-    """)
+    """
+    )
     
     trader = PaperTrader(capital_inicial=args.balance)
     
-    # Simula uma sequência de sinais de exemplo
+    # Simula uma sequência de sinais
     for sinal in gerar_sinais_simulados():
         if sinal["tipo"] == "BUY":
             trader.comprar(sinal["symbol"], sinal["quantidade"])
@@ -113,7 +115,7 @@ def run_config_command(args):
         print("\n📝 Edite o arquivo para personalizar os parâmetros")
     
     elif args.show:
-        config = get_config(debug_mode=args.debug if hasattr(args, 'debug') else False)
+        config = get_config(debug_mode=getattr(args, 'debug', False))
         print("\n📋 Configuração atual:")
         print(f"Symbol: {config.symbol}")
         print(f"Min confidence: {config.min_confidence}")
