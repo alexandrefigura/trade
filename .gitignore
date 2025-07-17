@@ -1,0 +1,6 @@
+.env
+*.zip
+*.pyc
+__pycache__/
+logs/
+ultra_trading_system.egg-info/

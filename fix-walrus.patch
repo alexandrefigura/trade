@@ -1,0 +1,18 @@
+﻿*** Begin Patch
+*** Update File: trade_system/config.py
+@@
+-    if config.feature_flags.enable_experimental_features := [
+-        "flag1",
+-        "flag2",
+-        # â€¦ existing flags â€¦
+-    ]:
+-        # â€¦ code when flags present â€¦
++    # Assign experimental feature flags before checking
++    config.feature_flags.enable_experimental_features = [
++        "flag1",
++        "flag2",
++        # â€¦ existing flags â€¦
++    ]
++    if config.feature_flags.enable_experimental_features:
++        # â€¦ code when flags present â€¦
+*** End Patch

@@ -1,0 +1,51 @@
+# Configuração do Sistema de Trading v5.2
+
+# Modo debug (parâmetros mais agressivos)
+debug_mode: false
+
+trading:
+  symbol: "BTCUSDT"
+  min_confidence: 0.75  # Confiança mínima para abrir posição (75%)
+  max_position_pct: 0.02  # Máximo 2% do balance por posição
+
+risk:
+  max_volatility: 0.05  # Máxima volatilidade aceita (5%)
+  max_spread_bps: 20  # Máximo spread em basis points
+  max_daily_loss: 0.02  # Stop loss diário (2%)
+  atr_period: 14  # Período para cálculo do ATR
+  tp_multiplier: 1.5  # Take profit em 1.5x ATR
+  sl_multiplier: 1.0  # Stop loss em 1x ATR
+
+ta:
+  # RSI
+  rsi_period: 14
+  rsi_buy_threshold: 30  # Compra quando RSI < 30
+  rsi_sell_threshold: 70  # Venda quando RSI > 70
+  rsi_confidence: 0.8
+  
+  # Moving Averages
+  sma_short_period: 9
+  sma_long_period: 20
+  ema_short_period: 9
+  ema_long_period: 20
+  sma_cross_confidence: 0.75
+  
+  # Bollinger Bands
+  bb_period: 20
+  bb_std_dev: 2.0
+  bb_confidence: 0.7
+  
+  # Pattern Detection
+  pattern_confidence: 0.85
+  
+  # Thresholds para decisão final
+  buy_threshold: 0.3
+  sell_threshold: 0.3
+
+filters:
+  min_volume_multiplier: 1.0  # Volume mínimo em relação à média
+  max_recent_volatility: 0.05  # Máxima volatilidade recente (5%)
+
+performance:
+  ta_interval_ms: 5000  # Intervalo mínimo entre análises técnicas
+  main_loop_interval_ms: 1000  # Intervalo do loop principal
