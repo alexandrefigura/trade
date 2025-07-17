@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_system.config import get_config, create_example_config
 from trade_system.logging_config import setup_logging
+from trade_system.paper_trader import PaperTrader, gerar_sinais_simulados
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -81,9 +82,21 @@ async def run_paper_trading_command(args):
 ╚══════════════════════════════════════════════════════════════╝
     """)
     
-    # TODO: Implementar paper trading
-    print("❌ Paper Trading ainda não implementado nesta versão modular")
-    print("Em desenvolvimento...")
+    trader = PaperTrader(capital_inicial=args.balance)
+    
+    # Simula uma sequência de sinais de exemplo
+    for sinal in gerar_sinais_simulados():
+        if sinal["tipo"] == "BUY":
+            trader.comprar(sinal["symbol"], sinal["quantidade"])
+        else:
+            trader.vender(sinal["symbol"], sinal["quantidade"])
+    
+    # Exibe resumo final
+    resumo = trader.resumo()
+    print("\n▶ RESULTADO FINAL:")
+    print(f"Capital restante: {resumo['capital_restante']}")
+    print(f"Posições: {resumo['posicoes']}")
+    print(f"Operações simuladas: {resumo['operacoes']}")
 
 
 def run_config_command(args):
@@ -100,7 +113,7 @@ def run_config_command(args):
         print("\n📝 Edite o arquivo para personalizar os parâmetros")
     
     elif args.show:
-        config = get_config()
+        config = get_config(debug_mode=args.debug if hasattr(args, 'debug') else False)
         print("\n📋 Configuração atual:")
         print(f"Symbol: {config.symbol}")
         print(f"Min confidence: {config.min_confidence}")
