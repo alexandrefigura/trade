@@ -86,14 +86,15 @@ async def run_paper_trading_command(args):
     
     trader = PaperTrader(capital_inicial=args.balance)
     
-    # Simula uma sequência de sinais
     for sinal in gerar_sinais_simulados():
-        if sinal["tipo"] == "BUY":
-            trader.comprar(sinal["symbol"], sinal["quantidade"])
-        else:
-            trader.vender(sinal["symbol"], sinal["quantidade"])
+        try:
+            if sinal["tipo"] == "BUY":
+                trader.comprar(sinal["symbol"], sinal["quantidade"])
+            else:
+                trader.vender(sinal["symbol"], sinal["quantidade"])
+        except ValueError as e:
+            print(f"⚠️ Ignorado {sinal['tipo']} {sinal['symbol']}: {e}")
     
-    # Exibe resumo final
     resumo = trader.resumo()
     print("\n▶ RESULTADO FINAL:")
     print(f"Capital restante: {resumo['capital_restante']}")
@@ -129,21 +130,16 @@ def main():
     parser = create_parser()
     args = parser.parse_args()
     
-    # Configurar logging
     setup_logging(log_level=args.log_level)
     
-    # Verificar comando
     if not args.command:
         parser.print_help()
         sys.exit(0)
     
-    # Executar comando apropriado
     if args.command == 'backtest':
         asyncio.run(run_backtest_command(args))
-    
     elif args.command == 'paper':
         asyncio.run(run_paper_trading_command(args))
-    
     elif args.command == 'config':
         run_config_command(args)
 
