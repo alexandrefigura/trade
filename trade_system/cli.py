@@ -28,35 +28,66 @@ Exemplos:
   python -m trade_system.cli paper                 # Inicia paper trading
   python -m trade_system.cli paper --no-backtest   # Paper trading sem backtest
   python -m trade_system.cli config                # Cria config.yaml exemplo
-        """
+"""
     )
-    
-    # Subcomandos
+
     subparsers = parser.add_subparsers(dest='command', help='Comandos disponíveis')
-    
+
     # Backtest
-    backtest_parser = subparsers.add_parser('backtest', help='Executa backtest da estratégia')
-    backtest_parser.add_argument('--debug', action='store_true', help='Modo debug com parâmetros agressivos')
-    backtest_parser.add_argument('--days', type=int, default=7, help='Dias de dados históricos (padrão: 7)')
-    backtest_parser.add_argument('--symbol', type=str, help='Par de trading (ex: BTCUSDT)')
-    
+    backtest_parser = subparsers.add_parser(
+        'backtest', help='Executa backtest da estratégia'
+    )
+    backtest_parser.add_argument(
+        '--debug', action='store_true',
+        help='Modo debug com parâmetros agressivos'
+    )
+    backtest_parser.add_argument(
+        '--days', type=int, default=7,
+        help='Dias de dados históricos (padrão: 7)'
+    )
+    backtest_parser.add_argument(
+        '--symbol', type=str,
+        help='Par de trading (ex: BTCUSDT)'
+    )
+
     # Paper Trading
-    paper_parser = subparsers.add_parser('paper', help='Inicia paper trading com dados reais')
-    paper_parser.add_argument('--debug', action='store_true', help='Modo debug')
-    paper_parser.add_argument('--no-backtest', action='store_true', help='Pular backtest inicial')
-    paper_parser.add_argument('--balance', type=float, default=10000, help='Balance inicial (padrão: 10000)')
-    
+    paper_parser = subparsers.add_parser(
+        'paper', help='Inicia paper trading com dados reais'
+    )
+    paper_parser.add_argument(
+        '--debug', action='store_true', help='Modo debug'
+    )
+    paper_parser.add_argument(
+        '--no-backtest', action='store_true',
+        help='Pular backtest inicial'
+    )
+    paper_parser.add_argument(
+        '--balance', type=float, default=10000,
+        help='Balance inicial (padrão: 10000)'
+    )
+
     # Config
-    config_parser = subparsers.add_parser('config', help='Gerenciar configurações')
-    config_parser.add_argument('--create', action='store_true', help='Criar config.yaml exemplo')
-    config_parser.add_argument('--show', action='store_true', help='Mostrar configuração atual')
-    
+    config_parser = subparsers.add_parser(
+        'config', help='Gerenciar configurações'
+    )
+    config_parser.add_argument(
+        '--create', action='store_true', help='Criar config.yaml exemplo'
+    )
+    config_parser.add_argument(
+        '--show', action='store_true', help='Mostrar configuração atual'
+    )
+
     # Opções globais
-    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
-                       default='INFO', help='Nível de logging')
-    parser.add_argument('--config-file', type=str, default='config.yaml', 
-                       help='Arquivo de configuração')
-    
+    parser.add_argument(
+        '--log-level',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+        default='INFO', help='Nível de logging'
+    )
+    parser.add_argument(
+        '--config-file', type=str, default='config.yaml',
+        help='Arquivo de configuração'
+    )
+
     return parser
 
 
@@ -66,10 +97,8 @@ async def run_backtest_command(args):
 ╔══════════════════════════════════════════════════════════════╗
 ║                    MODO BACKTEST                             ║
 ╚══════════════════════════════════════════════════════════════╝
-    """
-    )
-    
-    # TODO: Implementar backtest
+""")
+    # TODO: Integrar backtester
     print("❌ Backtest ainda não implementado nesta versão modular")
     print("Em desenvolvimento...")
 
@@ -81,20 +110,22 @@ async def run_paper_trading_command(args):
 ║                  PAPER TRADING MODE                          ║
 ║              Execução simulada com dados reais               ║
 ╚══════════════════════════════════════════════════════════════╝
-    """
-    )
-    
+""")
+
+    # Instanciar PaperTrader
     trader = PaperTrader(capital_inicial=args.balance)
-    
+
+    # Executar sinais simulados
     for sinal in gerar_sinais_simulados():
         try:
-            if sinal["tipo"] == "BUY":
-                trader.comprar(sinal["symbol"], sinal["quantidade"])
+            if sinal['tipo'] == 'BUY':
+                trader.comprar(sinal['symbol'], sinal['quantidade'])
             else:
-                trader.vender(sinal["symbol"], sinal["quantidade"])
+                trader.vender(sinal['symbol'], sinal['quantidade'])
         except ValueError as e:
             print(f"⚠️ Ignorado {sinal['tipo']} {sinal['symbol']}: {e}")
-    
+
+    # Exibir resultado
     resumo = trader.resumo()
     print("\n▶ RESULTADO FINAL:")
     print(f"Capital restante: {resumo['capital_restante']}")
@@ -104,17 +135,16 @@ async def run_paper_trading_command(args):
 
 def run_config_command(args):
     """Executa comando de configuração"""
+    cfg_file = args.config_file
     if args.create:
-        if os.path.exists('config.yaml'):
-            confirm = input("config.yaml já existe. Sobrescrever? (s/n): ")
+        if os.path.exists(cfg_file):
+            confirm = input(f"{cfg_file} já existe. Sobrescrever? (s/n): ")
             if confirm.lower() != 's':
                 print("Operação cancelada.")
                 return
-        
-        create_example_config()
-        print("✅ config.yaml criado com sucesso!")
+        create_example_config(cfg_file)
+        print(f"✅ {cfg_file} criado com sucesso!")
         print("\n📝 Edite o arquivo para personalizar os parâmetros")
-    
     elif args.show:
         config = get_config(debug_mode=getattr(args, 'debug', False))
         print("\n📋 Configuração atual:")
@@ -122,20 +152,23 @@ def run_config_command(args):
         print(f"Min confidence: {config.min_confidence}")
         print(f"Max position: {config.max_position_pct*100}%")
         print(f"Debug mode: {config.debug_mode}")
-        print(f"\nPara ver todas as configurações, abra config.yaml")
+        print(f"\nPara ver todas as configurações, abra {cfg_file}")
 
 
 def main():
     """Função principal do CLI"""
     parser = create_parser()
     args = parser.parse_args()
-    
+
+    # Configurar logging
     setup_logging(log_level=args.log_level)
-    
+
+    # Se nenhum comando, exibe help
     if not args.command:
         parser.print_help()
         sys.exit(0)
-    
+
+    # Disparar comandos
     if args.command == 'backtest':
         asyncio.run(run_backtest_command(args))
     elif args.command == 'paper':
