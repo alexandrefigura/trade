@@ -1,6 +1,7 @@
 """
 Módulo principal para orquestração do sistema de trading
 """
+import os
 import asyncio
 import signal
 from datetime import datetime
@@ -30,26 +31,26 @@ class TradingSystem:
         self.config = config or get_config()
         self.paper_trading = paper_trading
 
-        # Infra
+        # Infraestrutura
         self.cache = UltraFastCache(self.config)
         self.rate_limiter = RateLimiter(self.config)
         self.alert_system = AlertSystem(self.config)
         self.ws_manager = UltraFastWebSocketManager(self.config, self.cache)
 
-        # Análise
+        # Módulos de análise
         self.technical_analyzer = UltraFastTechnicalAnalysis(self.config)
         self.orderbook_analyzer = ParallelOrderbookAnalyzer(self.config)
         self.ml_predictor = SimplifiedMLPredictor()
         self.signal_consolidator = OptimizedSignalConsolidator()
 
-        # Risco e validação
+        # Gestão de risco e validação de mercado
         self.risk_manager = UltraFastRiskManager(self.config)
         self.market_validator = MarketConditionValidator(self.config)
 
-        # Checkpoint
+        # Gerenciamento de checkpoint
         self.checkpoint_manager = CheckpointManager()
 
-        # Estado
+        # Estado interno
         self.position: Optional[Dict] = None
         self.is_running = False
         self.performance_stats: Dict[str, float] = {
@@ -64,12 +65,13 @@ class TradingSystem:
         logger.info(f"🚀 Sistema inicializado - Modo: {'PAPER TRADING' if paper_trading else 'LIVE'}")
 
     async def initialize(self):
+        """Inicializa componentes assíncronos e carrega checkpoint"""
         checkpoint = self.checkpoint_manager.load_latest_checkpoint()
         if checkpoint:
             self._restore_from_checkpoint(checkpoint)
 
         self.ws_manager.start_delayed()
-        await self.alert_system.send_startup_alert(mode="PAPER" if self.paper_trading else "LIVE")
+        await self.alert_system.send_startup_alert("PAPER" if self.paper_trading else "LIVE")
 
         logger.info("⏳ Aguardando dados do WebSocket...")
         for _ in range(50):
@@ -79,8 +81,11 @@ class TradingSystem:
                 break
 
     async def run(self):
+        """Loop principal de coleta, análise e execução"""
         self.is_running = True
         cycle = 0
+        interval_s = self.config.main_loop_interval_ms / 1000.0
+        log_every = max(1, int(10 / interval_s))  # a cada ~10s
 
         try:
             while self.is_running:
@@ -89,130 +94,140 @@ class TradingSystem:
                     await asyncio.sleep(0.1)
                     continue
 
-                is_safe, reasons = await self.market_validator.validate(data, client=self.ws_manager.client)
+                # 1) Validar condições de mercado
+                is_safe, reasons = await self.market_validator.validate(data)
                 if not is_safe and not self.config.debug_mode:
-                    if cycle % (int(10_000 / self.config.main_loop_interval_ms)) == 0:
+                    if cycle % log_every == 0:
                         logger.warning(f"⚠️ Mercado inseguro: {', '.join(reasons)}")
                     await asyncio.sleep(0.1)
                     cycle += 1
                     continue
 
+                # 2) Gerar sinais
                 signals = await self._analyze_market(data)
-                action, conf = self.signal_consolidator.consolidate(signals)
+                action, confidence = self.signal_consolidator.consolidate(signals)
 
+                # 3) Gerenciar posições
                 if self.position:
-                    await self._manage_position(data, action, conf)
+                    await self._manage_position(data, action, confidence)
                 else:
-                    if action != 'HOLD' and conf >= self.config.min_confidence:
-                        await self._open_position(data, action, conf)
+                    if action != 'HOLD' and confidence >= self.config.min_confidence:
+                        await self._open_position(data, action, confidence)
 
+                # 4) Checkpoint periódico
                 if self.checkpoint_manager.should_checkpoint():
                     await self._save_checkpoint()
 
                 cycle += 1
-                await asyncio.sleep(self.config.main_loop_interval_ms / 1000.0)
+                await asyncio.sleep(interval_s)
 
         except Exception as e:
             logger.error(f"❌ Erro no loop principal: {e}", exc_info=True)
-            await self.alert_system.send_alert("Erro no Sistema", str(e), level="critical")
+            await self.alert_system.send_alert("Erro no Sistema", str(e), "critical")
         finally:
             await self.shutdown()
 
-    async def _analyze_market(self, data: Dict) -> List[Tuple[str, str, float]]:
-        prices = np.array(data['prices'], dtype=np.float64)
-        volumes = np.array(data['volumes'], dtype=np.float64)
-
-        ta_a, ta_c, ta_d = self.technical_analyzer.analyze(prices, volumes)
-        ob_a, ob_c, ob_d = self.orderbook_analyzer.analyze(
-            data['orderbook_bids'], data['orderbook_asks'], self.cache
+    async def _analyze_market(self, market_data: Dict) -> List[Tuple[str, str, float]]:
+        """Executa as três camadas de análise e retorna a lista de sinais"""
+        # Técnica
+        tech_act, tech_conf, tech_det = self.technical_analyzer.analyze(
+            market_data['prices'], market_data['volumes']
         )
+        # Orderbook
+        ob_act, ob_conf, ob_det = self.orderbook_analyzer.analyze(
+            market_data['orderbook_bids'],
+            market_data['orderbook_asks'],
+            self.cache
+        )
+        # ML
         features = {
-            'rsi': ta_d.get('rsi', 50.0),
-            'momentum': self._calculate_momentum(prices),
-            'volume_ratio': self._calculate_volume_ratio(volumes),
-            'spread_bps': ob_d.get('spread_bps', 0.0),
-            'volatility': self._calculate_volatility(prices)
+            'rsi': tech_det.get('rsi', 50.0),
+            'momentum': self._calculate_momentum(market_data['prices']),
+            'volume_ratio': self._calculate_volume_ratio(market_data['volumes']),
+            'spread_bps': ob_det.get('spread_bps', 0.0),
+            'volatility': self._calculate_volatility(market_data['prices']),
         }
-        ml_a, ml_c = self.ml_predictor.predict(features)
+        ml_act, ml_conf = self.ml_predictor.predict(features)
 
         return [
-            ('technical', ta_a, ta_c),
-            ('orderbook', ob_a, ob_c),
-            ('ml', ml_a, ml_c),
+            ('technical', tech_act, tech_conf),
+            ('orderbook', ob_act, ob_conf),
+            ('ml', ml_act, ml_conf),
         ]
 
-    async def _open_position(self, data: Dict, action: str, conf: float):
+    async def _open_position(self, data: Dict, action: str, confidence: float):
+        """Dispara abertura de posição (paper ou live)"""
         if self.paper_trading:
-            await self._open_paper_position(data, action, conf)
+            await self._open_paper_position(data, action, confidence)
         else:
-            logger.error("🔴 Trading real ainda não implementado")
+            logger.error("⚠️ Trading real ainda não implementado")
 
-    async def _open_paper_position(self, data: Dict, action: str, conf: float):
+    async def _open_paper_position(self, data: Dict, action: str, confidence: float):
+        """Abre posição simulada e registra no RiskManager"""
         price = float(data['prices'][-1])
-        vol = self._calculate_volatility(np.array(data['prices'], float))
-
-        size = self.risk_manager.calculate_position_size(conf, vol, price)
-        if size <= 0:
+        vol = self._calculate_volatility(data['prices'])
+        value = self.risk_manager.calculate_position_size(confidence, vol, price)
+        if value <= 0:
             return
 
-        fee = size * self.config.trade_fee_pct
-        qty = size / price
+        fee = value * self.config.fee_rate  # ex: 0.001
+        qty = value / price
 
         self.position = {
             'side': action,
             'entry_price': price,
             'quantity': qty,
             'entry_time': datetime.now(),
-            'confidence': conf,
+            'confidence': confidence,
             'entry_fee': fee,
+            'paper_trade': True,
         }
-
         self.risk_manager.set_position(self.position)
         self.risk_manager.current_balance -= fee
 
-        logger.info(f"🟢 POSIÇÃO ABERTA [{action}] @ ${price:.2f} x {qty:.6f} = ${size:.2f}")
-        await self.alert_system.send_alert(
-            f"POSIÇÃO ABERTA {action}",
-            f"Preço: ${price:.2f}\nQuantidade: {qty:.6f}\nValor: ${size:.2f}",
-            level="info"
-        )
+        logger.info(f"🟢 POSIÇÃO ABERTA [{action}]  price=${price:.2f} size=${value:.2f} qty={qty:.6f} fee=${fee:.2f}")
+        await self.alert_system.send_alert(f"Nova Posição {action}",
+                                          f"Preço: ${price:.2f}\nValor: ${value:.2f}\nConf: {confidence:.1%}",
+                                          "info")
 
-    async def _manage_position(self, data: Dict, action: str, conf: float):
+    async def _manage_position(self, data: Dict, action: str, confidence: float):
+        """Verifica se deve fechar a posição atual"""
         price = float(data['prices'][-1])
-        close, reason = self.risk_manager.should_close_position(
-            price, self.position['entry_price'], side=self.position['side']
+        should_close, reason = self.risk_manager.should_close_position(
+            price,
+            self.position['entry_price'],
+            self.position['side']
         )
-        if close:
+        if should_close:
             await self._close_position(price, reason)
 
     async def _close_position(self, exit_price: float, reason: str):
-        if not self.position:
-            return
-
-        side = self.position['side']
-        entry = self.position['entry_price']
+        """Fecha posição simulada, atualiza P&L e risk metrics"""
+        entry_price = self.position['entry_price']
         qty = self.position['quantity']
+        side = self.position['side']
 
-        pnl = (exit_price - entry) * qty if side == 'BUY' else (entry - exit_price) * qty
-        fee = exit_price * qty * self.config.trade_fee_pct
-        net = pnl - fee
+        pnl = (exit_price - entry_price) * qty if side == 'BUY' else (entry_price - exit_price) * qty
+        exit_fee = exit_price * qty * self.config.fee_rate
+        pnl_net = pnl - exit_fee
+        total_fees = self.position['entry_fee'] + exit_fee
 
-        self.performance_stats['total_trades']   += 1
-        self.performance_stats['winning_trades'] += 1 if net>0 else 0
-        self.performance_stats['total_pnl']      += net
-        self.performance_stats['total_fees']     += (self.position['entry_fee'] + fee)
+        # Estatísticas
+        self.performance_stats['total_trades'] += 1
+        if pnl_net > 0:
+            self.performance_stats['winning_trades'] += 1
+        self.performance_stats['total_pnl'] += pnl_net
+        self.performance_stats['total_fees'] += total_fees
 
-        self.risk_manager.update_after_trade(net, fee)
+        # Atualiza risk manager
+        self.risk_manager.update_after_trade(pnl_net, exit_fee)
         self.risk_manager.clear_position()
-
-        logger.info(f"🔴 POSIÇÃO FECHADA ({reason}) P&L: ${net:.2f} Taxa: ${fee:.2f}")
-        await self.alert_system.send_alert(
-            f"POSIÇÃO FECHADA ({reason})",
-            f"P&L: ${net:.2f}\nTaxa: ${fee:.2f}",
-            level="info"
-        )
-
         self.position = None
+
+        logger.info(f"🔴 POSIÇÃO FECHADA  exit=${exit_price:.2f} P&L=${pnl_net:.2f} fees=${total_fees:.2f} reason={reason}")
+        await self.alert_system.send_alert("Posição Fechada",
+                                          f"P&L: ${pnl_net:.2f}\nFees: ${total_fees:.2f}\nMotivo: {reason}",
+                                          "info")
 
     async def _save_checkpoint(self):
         state = {
@@ -223,14 +238,16 @@ class TradingSystem:
         }
         self.checkpoint_manager.save_checkpoint(state)
         self.checkpoint_manager.update_checkpoint_time()
+        logger.debug("✅ Checkpoint salvo")
 
     def _restore_from_checkpoint(self, ckpt: Dict):
-        self.risk_manager.current_balance = ckpt.get('balance', self.risk_manager.current_balance)
-        self.position = ckpt.get('position', None)
+        self.risk_manager.current_balance = ckpt.get('balance', self.risk_manager.initial_balance)
+        self.position = ckpt.get('position')
         self.performance_stats = ckpt.get('performance_stats', self.performance_stats)
         logger.info("✅ Estado restaurado do checkpoint")
 
     async def shutdown(self):
+        """Encerra sistema, salva checkpoint final e envia alerta"""
         logger.info("🛑 Desligando sistema...")
         self.is_running = False
         self.ws_manager.stop()
@@ -238,32 +255,36 @@ class TradingSystem:
         await self.alert_system.send_shutdown_alert()
         logger.info("✅ Sistema desligado")
 
-    # ——— Helpers ———
+    # Métodos utilitários de cálculo de features
+    def _calculate_momentum(self, prices: List[float]) -> float:
+        if len(prices) < 20:
+            return 0.0
+        return (prices[-1] - prices[-20]) / prices[-20]
 
-    def _calculate_momentum(self, prices: np.ndarray) -> float:
-        p = prices
-        n = self.config.momentum_period
-        return float((p[-1] - p[-n]) / p[-n]) if p.size >= n else 0.0
+    def _calculate_volume_ratio(self, volumes: List[float]) -> float:
+        if len(volumes) < 20:
+            return 1.0
+        avg = np.mean(volumes[-20:])
+        return float(volumes[-1] / avg) if avg > 0 else 1.0
 
-    def _calculate_volume_ratio(self, vols: np.ndarray) -> float:
-        n = self.config.volume_ratio_period
-        return float(vols[-1] / np.mean(vols[-n:])) if vols.size >= n else 1.0
+    def _calculate_volatility(self, prices: List[float]) -> float:
+        if len(prices) < 50:
+            return 0.01
+        arr = np.array(prices[-50:], dtype=np.float64)
+        return float(np.std(arr) / np.mean(arr))
 
-    def _calculate_volatility(self, prices: np.ndarray) -> float:
-        n = self.config.volatility_period
-        return float(np.std(prices[-n:]) / np.mean(prices[-n:])) if prices.size >= n else 0.01
-
-
-# Entrypoints
 
 async def run_paper_trading(
     config=None,
     initial_balance: float = 10000.0,
     debug_mode: bool = False
 ):
+    """Ponto de entrada para paper trading"""
     setup_logging()
     cfg = config or get_config(debug_mode=debug_mode)
+
     system = TradingSystem(cfg, paper_trading=True)
+    # ajusta balance inicial
     system.risk_manager.current_balance = initial_balance
     system.risk_manager.initial_balance = initial_balance
 
@@ -272,13 +293,13 @@ async def run_paper_trading(
         await system.run()
     except KeyboardInterrupt:
         logger.info("⏹️ Interrompido pelo usuário")
-    finally:
         await system.shutdown()
 
 
 def handle_signals():
+    """Configura tratamento de SIGINT/SIGTERM"""
     def _handler(sig, frame):
-        logger.info(f"Sinal {sig} recebido, finalizando...")
+        logger.info(f"Sinal {sig} recebido, encerrando...")
     signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
 
