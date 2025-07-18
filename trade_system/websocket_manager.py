@@ -1,366 +1,273 @@
-"""
-WebSocket Manager ultra-rápido para dados em tempo real
-"""
-import time
-import queue
-import threading
-import logging
-import asyncio
+"""Sistema de Machine Learning para predição"""
 import numpy as np
-from typing import Dict, Optional
-from binance import ThreadedWebsocketManager
-from trade_system.logging_config import get_logger
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+import joblib
+import logging
+from typing import Dict, Tuple, List, Optional, Any
+from pathlib import Path
 
-logger = get_logger(__name__)
-
-
-class UltraFastWebSocketManager:
-    """WebSocket otimizado para máxima throughput com reconexão automática"""
+class MLPredictor:
+    """Preditor ML avançado para trading"""
     
-    def __init__(self, config, cache):
-        self.config = config
-        self.cache = cache
-        self.twm = None
+    def __init__(self, config: Any):
+        self.config = config.ml if hasattr(config, 'ml') else config.get('ml', {})
+        self.logger = logging.getLogger(__name__)
         
-        # Buffers NumPy pré-alocados
-        self.price_buffer = np.zeros(config.price_buffer_size, dtype=np.float32)
-        self.volume_buffer = np.zeros(config.price_buffer_size, dtype=np.float32)
-        self.time_buffer = np.zeros(config.price_buffer_size, dtype=np.int64)
-        self.buffer_index = 0
-        self.buffer_filled = False
+        # Modelos
+        self.model = None
+        self.scaler = StandardScaler()
         
-        # Orderbook otimizado
-        self.orderbook_bids = np.zeros((20, 2), dtype=np.float32)
-        self.orderbook_asks = np.zeros((20, 2), dtype=np.float32)
+        # Features
+        self.feature_names = self.config.get('features', [
+            'rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 
+            'bb_middle', 'volume_ratio', 'price_change', 'volatility',
+            'momentum', 'support', 'resistance', 'trend_strength',
+            'volume_profile', 'ema_diff', 'atr'
+        ])
+        
+        # Estado
+        self.is_trained = False
+        self.model_path = Path("models")
+        self.model_path.mkdir(exist_ok=True)
         
         # Métricas
-        self.messages_processed = 0
-        self.last_update_time = time.perf_counter()
-        self.last_message_time = time.time()
+        self.training_metrics = {}
         
-        # Queues thread-safe
-        self.high_priority_queue = queue.Queue(maxsize=100)
-        self.normal_queue = queue.Queue(maxsize=1000)
-        
-        # Controle
-        self.is_connected = False
-        self.reconnect_count = 0
-        self.max_reconnect_attempts = 10
-        self.reconnect_delay = 1
-        
-        # Threads
-        self.monitor_thread = None
-        self.processor_thread = None
-        
-        # Flags
-        self._initialized = False
-        self._start_lock = threading.Lock()
-        self._running = True
-        
-        # Modo simulado para testes
-        self.simulate_mode = False
-        
-        logger.info("📡 WebSocket Manager inicializado")
+        self.logger.info("🤖 ML Predictor inicializado")
     
-    def start_delayed(self):
-        """Inicia o WebSocket de forma atrasada"""
-        with self._start_lock:
-            if not self._initialized and not self.simulate_mode:
-                self._initialized = True
-                threading.Thread(target=self._start_in_thread, daemon=True).start()
-                logger.info("⏳ WebSocket agendado para iniciar...")
+    def prepare_features(self, candles: pd.DataFrame, 
+                        ta_indicators: Dict[str, float]) -> np.ndarray:
+        """
+        Prepara features para o modelo
+        
+        Args:
+            candles: DataFrame com dados OHLCV
+            ta_indicators: Indicadores técnicos calculados
+            
+        Returns:
+            Array de features normalizado
+        """
+        features = []
+        
+        for feature_name in self.feature_names:
+            if feature_name in ta_indicators:
+                value = ta_indicators[feature_name]
+                if isinstance(value, (int, float)) and not np.isnan(value):
+                    features.append(value)
+                else:
+                    self.logger.warning(f"Feature ausente: {feature_name}")
+                    features.append(0.0)
+            else:
+                features.append(0.0)
+        
+        return np.array(features).reshape(1, -1)
     
-    def _start_in_thread(self):
-        """Inicia em thread separada com delay"""
-        time.sleep(2)
-        self._start()
-    
-    def _start(self):
-        """Inicia WebSocket com streams otimizados"""
+    def train(self, candles: pd.DataFrame, ta_analyzer: Any):
+        """
+        Treina o modelo com dados históricos
+        
+        Args:
+            candles: DataFrame com dados históricos
+            ta_analyzer: Analisador técnico para extrair features
+        """
         try:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_closed():
-                    raise RuntimeError("Event loop is closed")
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                logger.info("🔧 Novo event loop criado")
+            self.logger.info("🔄 Iniciando treinamento do modelo ML...")
             
-            self.twm = ThreadedWebsocketManager()
-            self.twm.start()
+            # Preparar dataset
+            X, y = self._prepare_training_data(candles, ta_analyzer)
             
-            time.sleep(0.5)
+            if len(X) < 100:
+                self.logger.warning("Dados insuficientes para treinar ML")
+                return
             
-            logger.info(f"🔌 Conectando aos streams do {self.config.symbol}...")
+            # Normalizar features
+            X_scaled = self.scaler.fit_transform(X)
             
-            # Streams essenciais
-            self.twm.start_aggtrade_socket(
-                callback=self._process_trade,
-                symbol=self.config.symbol
+            # Split treino/teste
+            test_size = self.config.get('test_size', 0.2)
+            X_train, X_test, y_train, y_test = train_test_split(
+                X_scaled, y, test_size=test_size, random_state=42, stratify=y
             )
             
-            self.twm.start_depth_socket(
-                callback=self._process_orderbook,
-                symbol=self.config.symbol,
-                depth=20,
-                interval=100
+            # Treinar modelo ensemble
+            self.model = self._create_ensemble_model()
+            self.model.fit(X_train, y_train)
+            
+            # Avaliar modelo
+            self._evaluate_model(X_test, y_test)
+            
+            # Salvar modelo
+            self._save_model()
+            
+            self.is_trained = True
+            self.logger.info("✅ Modelo ML treinado com sucesso!")
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao treinar ML: {e}")
+            self.is_trained = False
+    
+    def _prepare_training_data(self, candles: pd.DataFrame, 
+                              ta_analyzer: Any) -> Tuple[np.ndarray, np.ndarray]:
+        """Prepara dados para treinamento"""
+        lookback = self.config.get('lookback', 100)
+        X = []
+        y = []
+        
+        for i in range(lookback, len(candles) - 1):
+            # Analisar período
+            period_candles = candles.iloc[i-lookback:i].copy()
+            analysis = ta_analyzer.analyze(period_candles)
+            
+            if analysis['indicators']:
+                # Extrair features
+                features = self.prepare_features(period_candles, analysis['indicators'])
+                X.append(features[0])
+                
+                # Criar label (1 = preço sobe, 0 = preço desce)
+                current_price = candles.iloc[i]['close']
+                future_price = candles.iloc[i+1]['close']
+                
+                # Considerar movimento significativo (> 0.1%)
+                price_change = (future_price - current_price) / current_price
+                y.append(1 if price_change > 0.001 else 0)
+        
+        return np.array(X), np.array(y)
+    
+    def _create_ensemble_model(self):
+        """Cria modelo ensemble"""
+        model_type = self.config.get('model_type', 'gradient_boosting')
+        n_estimators = self.config.get('n_estimators', 100)
+        
+        if model_type == 'gradient_boosting':
+            return GradientBoostingClassifier(
+                n_estimators=n_estimators,
+                learning_rate=0.1,
+                max_depth=3,
+                random_state=42,
+                subsample=0.8,
+                min_samples_split=5
             )
-            
-            # Thread de processamento
-            if not self.processor_thread or not self.processor_thread.is_alive():
-                self.processor_thread = threading.Thread(
-                    target=self._process_queue_loop,
-                    daemon=True
-                )
-                self.processor_thread.start()
-            
-            # Thread de monitoramento
-            if not self.monitor_thread or not self.monitor_thread.is_alive():
-                self.monitor_thread = threading.Thread(
-                    target=self._monitor_connection,
-                    daemon=True
-                )
-                self.monitor_thread.start()
-            
-            self.is_connected = True
-            self.reconnect_count = 0
-            logger.info("🚀 WebSocket conectado com sucesso!")
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao iniciar WebSocket: {e}")
-            self._schedule_reconnect()
+        else:  # random_forest
+            return RandomForestClassifier(
+                n_estimators=n_estimators,
+                max_depth=5,
+                random_state=42,
+                min_samples_split=5,
+                class_weight='balanced'
+            )
     
-    def _monitor_connection(self):
-        """Monitora conexão e reconecta se necessário"""
-        while self._running:
-            try:
-                time.sleep(5)
-                
-                if self.is_connected and time.time() - self.last_message_time > 30:
-                    logger.warning("⚠️ WebSocket sem mensagens há 30s")
-                    self._reconnect()
-                    
-            except Exception as e:
-                logger.error(f"Erro no monitor: {e}")
-    
-    def _reconnect(self):
-        """Reconecta com backoff exponencial"""
-        self.is_connected = False
+    def _evaluate_model(self, X_test: np.ndarray, y_test: np.ndarray):
+        """Avalia performance do modelo"""
+        y_pred = self.model.predict(X_test)
         
-        if self.reconnect_count >= self.max_reconnect_attempts:
-            logger.error("❌ Máximo de reconexões atingido")
-            return
-        
-        self.reconnect_count += 1
-        delay = self.reconnect_delay * (2 ** (self.reconnect_count - 1))
-        delay = min(delay, 60)
-        
-        logger.info(f"🔄 Reconectando em {delay}s (tentativa {self.reconnect_count})")
-        
-        if self.twm:
-            try:
-                self.twm.stop()
-            except:
-                pass
-        
-        time.sleep(delay)
-        self._start()
-    
-    def _schedule_reconnect(self):
-        """Agenda reconexão assíncrona"""
-        threading.Thread(
-            target=self._reconnect,
-            daemon=True
-        ).start()
-    
-    def _process_trade(self, msg):
-        """Processa trades com latência mínima"""
-        try:
-            self.last_message_time = time.time()
-            
-            price = float(msg['p'])
-            volume = float(msg['q'])
-            timestamp = msg['T']
-            is_buyer_maker = msg['m']
-            
-            # Detectar trades grandes
-            if volume * price > 50000:
-                self.high_priority_queue.put((
-                    'large_trade',
-                    price,
-                    volume,
-                    is_buyer_maker,
-                    timestamp
-                ))
-            
-            # Atualizar buffer
-            idx = self.buffer_index % self.config.price_buffer_size
-            self.price_buffer[idx] = price
-            self.volume_buffer[idx] = volume
-            self.time_buffer[idx] = timestamp
-            
-            self.buffer_index += 1
-            if self.buffer_index >= self.config.price_buffer_size:
-                self.buffer_filled = True
-            
-            self.messages_processed += 1
-            
-            if self.messages_processed == 1:
-                logger.info(f"✅ Primeiro trade: ${price:,.2f}")
-            
-        except Exception as e:
-            logger.error(f"Erro processando trade: {e}")
-    
-    def _process_orderbook(self, msg):
-        """Processa orderbook otimizado"""
-        try:
-            self.last_message_time = time.time()
-            
-            bids = msg['bids']
-            asks = msg['asks']
-            
-            # Copiar para arrays
-            for i in range(min(20, len(bids))):
-                self.orderbook_bids[i, 0] = float(bids[i][0])
-                self.orderbook_bids[i, 1] = float(bids[i][1])
-            
-            for i in range(min(20, len(asks))):
-                self.orderbook_asks[i, 0] = float(asks[i][0])
-                self.orderbook_asks[i, 1] = float(asks[i][1])
-            
-            # Calcular imbalance
-            bid_volume = np.sum(self.orderbook_bids[:5, 1])
-            ask_volume = np.sum(self.orderbook_asks[:5, 1])
-            
-            if bid_volume + ask_volume > 0:
-                imbalance = (bid_volume - ask_volume) / (bid_volume + ask_volume)
-                
-                self.cache.set('orderbook_imbalance', imbalance, ttl=1)
-                
-                if abs(imbalance) > 0.7:
-                    self.high_priority_queue.put(('imbalance', imbalance))
-                    
-        except Exception as e:
-            logger.error(f"Erro processando orderbook: {e}")
-    
-    def _process_queue_loop(self):
-        """Loop de processamento dedicado"""
-        while self._running:
-            try:
-                while not self.high_priority_queue.empty():
-                    data = self.high_priority_queue.get_nowait()
-                    self._handle_priority_event(data)
-                
-                time.sleep(0.001)
-                
-            except:
-                pass
-    
-    def _handle_priority_event(self, data):
-        """Processa eventos de alta prioridade"""
-        event_type = data[0]
-        
-        if event_type == 'large_trade':
-            _, price, volume, is_buyer, timestamp = data
-            side = "COMPRA" if is_buyer else "VENDA"
-            logger.info(f"🐋 TRADE GRANDE [{side}]: ${volume * price:,.0f} @ ${price:,.2f}")
-            
-        elif event_type == 'imbalance':
-            _, imbalance = data
-            direction = "COMPRA" if imbalance > 0 else "VENDA"
-            logger.info(f"📊 IMBALANCE [{direction}]: {abs(imbalance)*100:.1f}%")
-    
-    def get_latest_data(self) -> Dict:
-        """Retorna dados mais recentes"""
-        if self.simulate_mode and self.buffer_filled:
-            return self._get_simulated_data()
-        
-        if not self.buffer_filled and self.buffer_index < 100:
-            return None
-        
-        end_idx = self.buffer_index if not self.buffer_filled else self.config.price_buffer_size
-        start_idx = max(0, end_idx - 1000)
-        
-        return {
-            'prices': self.price_buffer[start_idx:end_idx],
-            'volumes': self.volume_buffer[start_idx:end_idx],
-            'timestamps': self.time_buffer[start_idx:end_idx],
-            'orderbook_bids': self.orderbook_bids.copy(),
-            'orderbook_asks': self.orderbook_asks.copy(),
-            'messages_per_second': self._calculate_mps()
+        self.training_metrics = {
+            'accuracy': accuracy_score(y_test, y_pred),
+            'precision': precision_score(y_test, y_pred, zero_division=0),
+            'recall': recall_score(y_test, y_pred, zero_division=0),
+            'samples': len(y_test)
         }
-    
-    def _get_simulated_data(self) -> Dict:
-        """Retorna dados simulados para testes"""
-        return {
-            'prices': self.price_buffer[:1000],
-            'volumes': self.volume_buffer[:1000],
-            'timestamps': self.time_buffer[:1000],
-            'orderbook_bids': self.orderbook_bids.copy(),
-            'orderbook_asks': self.orderbook_asks.copy(),
-            'messages_per_second': 100.0
-        }
-    
-    def _calculate_mps(self) -> float:
-        """Calcula mensagens por segundo"""
-        now = time.perf_counter()
-        elapsed = now - self.last_update_time
         
-        if elapsed > 1.0:
-            mps = self.messages_processed / elapsed
-            self.messages_processed = 0
-            self.last_update_time = now
-            return mps
-        
-        return 0
-    
-    def stop(self):
-        """Para o WebSocket de forma segura"""
-        try:
-            logger.info("🛑 Parando WebSocket...")
-            self._running = False
-            self.is_connected = False
+        # Feature importance
+        if hasattr(self.model, 'feature_importances_'):
+            importances = self.model.feature_importances_
+            feature_importance = dict(zip(self.feature_names, importances))
+            top_features = sorted(feature_importance.items(), 
+                                key=lambda x: x[1], reverse=True)[:5]
             
-            if self.twm:
-                self.twm.stop()
-                
-            logger.info("✅ WebSocket parado")
+            self.logger.info("Top 5 features:")
+            for feature, importance in top_features:
+                self.logger.info(f"  - {feature}: {importance:.3f}")
+        
+        self.logger.info(f"Métricas do modelo:")
+        self.logger.info(f"  - Acurácia: {self.training_metrics['accuracy']:.2%}")
+        self.logger.info(f"  - Precisão: {self.training_metrics['precision']:.2%}")
+        self.logger.info(f"  - Recall: {self.training_metrics['recall']:.2%}")
+    
+    def predict(self, features: np.ndarray) -> Tuple[str, float]:
+        """
+        Faz predição com o modelo treinado
+        
+        Args:
+            features: Features normalizadas
+            
+        Returns:
+            Tuple (sinal, confiança)
+        """
+        if not self.is_trained or self.model is None:
+            return 'HOLD', 0.0
+        
+        try:
+            # Normalizar features
+            features_scaled = self.scaler.transform(features)
+            
+            # Predição com probabilidade
+            prediction = self.model.predict(features_scaled)[0]
+            probabilities = self.model.predict_proba(features_scaled)[0]
+            
+            # Confiança é a probabilidade da classe predita
+            confidence = max(probabilities)
+            
+            # Ajustar threshold baseado nas métricas de treinamento
+            threshold = 0.6
+            if self.training_metrics.get('accuracy', 0) < 0.55:
+                threshold = 0.7  # Mais conservador se acurácia baixa
+            
+            if prediction == 1 and confidence > threshold:
+                return 'BUY', confidence
+            elif prediction == 0 and confidence > threshold:
+                return 'SELL', confidence
+            else:
+                return 'HOLD', confidence
+            
         except Exception as e:
-            logger.error(f"Erro ao parar: {e}")
+            self.logger.error(f"Erro na predição ML: {e}")
+            return 'HOLD', 0.0
     
-    def get_connection_status(self) -> Dict:
-        """Retorna status da conexão"""
-        return {
-            'connected': self.is_connected,
-            'reconnect_count': self.reconnect_count,
-            'buffer_filled': self.buffer_filled,
-            'buffer_size': self.buffer_index,
-            'last_message': datetime.fromtimestamp(self.last_message_time).strftime('%H:%M:%S') if self.last_message_time else 'Never',
-            'messages_per_second': self._calculate_mps()
-        }
+    def _save_model(self):
+        """Salva modelo treinado"""
+        try:
+            model_file = self.model_path / "trading_model.pkl"
+            scaler_file = self.model_path / "scaler.pkl"
+            
+            joblib.dump(self.model, model_file)
+            joblib.dump(self.scaler, scaler_file)
+            
+            # Salvar métricas
+            metrics_file = self.model_path / "metrics.json"
+            import json
+            with open(metrics_file, 'w') as f:
+                json.dump(self.training_metrics, f, indent=2)
+            
+            self.logger.info(f"Modelo salvo em: {model_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao salvar modelo: {e}")
     
-    def enable_simulation_mode(self):
-        """Ativa modo simulado para testes"""
-        self.simulate_mode = True
-        self._fill_with_simulated_data()
-        self.is_connected = True
-        logger.info("🎮 Modo simulado ativado")
+    def load_model(self) -> bool:
+        """Carrega modelo salvo"""
+        try:
+            model_file = self.model_path / "trading_model.pkl"
+            scaler_file = self.model_path / "scaler.pkl"
+            
+            if model_file.exists() and scaler_file.exists():
+                self.model = joblib.load(model_file)
+                self.scaler = joblib.load(scaler_file)
+                self.is_trained = True
+                
+                self.logger.info("✅ Modelo carregado com sucesso")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao carregar modelo: {e}")
+            return False
     
-    def _fill_with_simulated_data(self):
-        """Preenche buffers com dados simulados"""
-        base_price = 40000.0
-        for i in range(1000):
-            self.price_buffer[i] = base_price + np.random.randn() * 100
-            self.volume_buffer[i] = np.random.rand() * 10
-            self.time_buffer[i] = int(time.time() * 1000) + i * 1000
-        
-        self.buffer_index = 1000
-        self.buffer_filled = True
-        
-        # Orderbook simulado
-        for i in range(20):
-            self.orderbook_bids[i, 0] = base_price - (i * 10)
-            self.orderbook_bids[i, 1] = np.random.rand() * 5
-            self.orderbook_asks[i, 0] = base_price + (i * 10)
-            self.orderbook_asks[i, 1] = np.random.rand() * 5
+    def should_retrain(self, trades_count: int) -> bool:
+        """Verifica se deve retreinar o modelo"""
+        retrain_interval = self.config.get('retrain_interval', 1000)
+        return trades_count % retrain_interval == 0
