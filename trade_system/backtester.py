@@ -115,9 +115,13 @@ class IntegratedBacktester:
             
             # Gerenciar posições
             current_price = prices[i]
+
+            # Ignorar sinais SELL sem posição aberta (sem short selling)
+            if position is None and action == 'SELL':
+                continue
             
-            # Entrada
-            if position is None and action != 'HOLD' and confidence > self.config.min_confidence:
+            # Entrada LONG apenas
+            if position is None and action == 'BUY' and confidence > self.config.min_confidence:
                 # Calcular tamanho da posição
                 position_size = self._calculate_position_size(
                     balance, confidence, features.get('volatility', 0.01)
@@ -129,24 +133,16 @@ class IntegratedBacktester:
                     
                     if atr and atr > 0:
                         # Calcular stops baseados em ATR
-                        if action == 'BUY':
-                            tp_price = current_price + (atr * self.config.tp_multiplier)
-                            sl_price = current_price - (atr * self.config.sl_multiplier)
-                        else:  # SELL
-                            tp_price = current_price - (atr * self.config.tp_multiplier)
-                            sl_price = current_price + (atr * self.config.sl_multiplier)
+                        tp_price = current_price + (atr * self.config.tp_multiplier)
+                        sl_price = current_price - (atr * self.config.sl_multiplier)
                     else:
                         # Fallback para percentuais fixos
-                        if action == 'BUY':
-                            tp_price = current_price * 1.015
-                            sl_price = current_price * 0.99
-                        else:
-                            tp_price = current_price * 0.985
-                            sl_price = current_price * 1.01
+                        tp_price = current_price * 1.015
+                        sl_price = current_price * 0.99
                     
                     # Abrir posição
                     position = {
-                        'side': action,
+                        'side': 'BUY',
                         'entry_price': current_price,
                         'entry_idx': i,
                         'entry_time': historical_data.index[i] if hasattr(historical_data, 'index') else i,
@@ -197,7 +193,7 @@ class IntegratedBacktester:
 - Distribuição: BUY={signal_counts['BUY']}, SELL={signal_counts['SELL']}, HOLD={signal_counts['HOLD']}
 - Trades executados: {len(trades)}
 - Balance final: ${balance:,.2f}
-        """)
+        """ )
         
         # Calcular métricas
         return self._calculate_metrics(
@@ -531,14 +527,6 @@ async def run_backtest_validation(
 ) -> Optional[Dict]:
     """
     Executa backtest para validação de estratégia
-    
-    Args:
-        config: Configuração (criará uma se None)
-        days: Dias de dados históricos
-        debug_mode: Modo debug ativado
-        
-    Returns:
-        Resultados do backtest ou None se falhar
     """
     from trade_system.config import get_config
     from binance.client import Client
