@@ -19,6 +19,8 @@ class IntegratedBacktester:
 
     def __init__(self, config):
         self.config = config
+        # tamanho de janela de análise técnica (fallback para 1000 se não definido)
+        self.tech_window = getattr(config, "tech_window", 1000)
 
     async def backtest_strategy(
         self,
@@ -26,7 +28,7 @@ class IntegratedBacktester:
         initial_balance: float = 10000.0
     ) -> Dict:
         logger.info("🔄 Iniciando backtest...")
-        # Validação de colunas
+        # 1) validar colunas OHLCV
         required = {'open', 'high', 'low', 'close', 'volume'}
         if not required.issubset(historical_data.columns):
             missing = required - set(historical_data.columns)
@@ -38,28 +40,28 @@ class IntegratedBacktester:
         trades: List[Dict] = []
         equity_curve: List[Dict] = []
 
-        # Extrair arrays NumPy
+        # 2) extrair arrays NumPy
         o = historical_data['open'].values.astype(float)
         h = historical_data['high'].values.astype(float)
         l = historical_data['low'].values.astype(float)
         c = historical_data['close'].values.astype(float)
         v = historical_data['volume'].values.astype(float)
 
-        # Pré-cálculo de ATR e instância de analisadores
+        # 3) ATR + instâncias
         atr_series = calculate_atr(h, l, c, period=self.config.atr_period)
         tech = UltraFastTechnicalAnalysis(self.config)
         ml = SimplifiedMLPredictor()
         consolidator = OptimizedSignalConsolidator()
 
-        # Loop principal de candles
+        # 4) loop de backtest
         for i in range(self.config.atr_period, len(c)):
             slice_p = c[: i + 1]
             slice_v = v[: i + 1]
 
-            # 1) sinais técnica + ML
+            # 4.1) sinais técnico + ML
             t_act, t_conf, t_det = tech.analyze(
-                slice_p[-self.config.tech_window:],
-                slice_v[-self.config.tech_window:]
+                slice_p[-self.tech_window :],
+                slice_v[-self.tech_window :]
             )
             features = self._extract_features(c, v, i, t_det)
             m_act, m_conf = ml.predict(features)
@@ -70,7 +72,7 @@ class IntegratedBacktester:
             price = c[i]
             current_atr = atr_series[i] if not np.isnan(atr_series[i]) else None
 
-            # 2) entrada LONG
+            # 4.2) entrada LONG
             if position is None and action == 'BUY' and conf >= self.config.min_confidence:
                 size_usd = self._calc_size(balance, conf, features['volatility'])
                 if size_usd > 0:
@@ -84,7 +86,7 @@ class IntegratedBacktester:
                         'entry_time': datetime.now()
                     }
 
-            # 3) saída
+            # 4.3) saída
             elif position:
                 should_close, reason = self._should_exit(position, price)
                 if should_close:
@@ -93,7 +95,7 @@ class IntegratedBacktester:
                     balance += result['pnl_net']
                     position = None
 
-            # 4) registrar equity curve
+            # 4.4) equity curve
             equity_curve.append({'idx': i, 'balance': balance})
 
         # 5) fechar posição remanescente
@@ -102,7 +104,7 @@ class IntegratedBacktester:
             trades.append(result)
             balance += result['pnl_net']
 
-        # 6) calcular e retornar métricas
+        # 6) métricas finais
         metrics = self._metrics(trades, initial_balance, balance, equity_curve)
         logger.info(f"✅ Backtest concluído — Trades: {len(trades)}, Balance final: ${balance:.2f}")
         return metrics
@@ -133,7 +135,7 @@ class IntegratedBacktester:
         price: float,
         atr: Optional[float]
     ) -> Tuple[float, float]:
-        """Retorna (take_profit, stop_loss) baseados em ATR ou percentuais."""
+        """Retorna (take_profit, stop_loss)."""
         if atr and atr > 0:
             return price + atr * self.config.tp_multiplier, price - atr * self.config.sl_multiplier
         return price * (1 + self.config.tp_pct), price * (1 - self.config.sl_pct)
@@ -143,7 +145,7 @@ class IntegratedBacktester:
         pos: Dict,
         price: float
     ) -> Tuple[bool, str]:
-        """Verifica SL/TP e indica se deve fechar posição."""
+        """Verifica SL/TP."""
         if price >= pos['tp']:
             return True, 'tp'
         if price <= pos['sl']:
@@ -156,7 +158,7 @@ class IntegratedBacktester:
         price: float,
         reason: str
     ) -> Dict:
-        """Calcula PnL líquido e retorna dados do trade."""
+        """Calcula PnL líquido."""
         entry = pos['entry_price']
         qty = pos['qty']
         pnl = (price - entry) * qty
@@ -170,7 +172,7 @@ class IntegratedBacktester:
         final_balance: float,
         equity_curve: List[Dict]
     ) -> Dict:
-        """Métricas básicas: número de trades, lucro, retorno e Sharpe."""
+        """Métricas: número de trades, lucro, retorno e Sharpe."""
         num = len(trades)
         net_profit = sum(t['pnl_net'] for t in trades)
         total_return = (final_balance - init_balance) / init_balance if init_balance else 0.0
