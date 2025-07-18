@@ -4,7 +4,7 @@ Gestão de risco ultra-rápida e validação de condições de mercado
 import time
 import numpy as np
 from datetime import datetime
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Tuple, List, Optional
 from trade_system.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -19,13 +19,13 @@ class UltraFastRiskManager:
         self.current_balance = self.initial_balance
         self.daily_pnl = 0.0
         self.max_daily_loss = config.max_daily_loss
-        self.position_info = None
+        self.position_info: Optional[Dict] = None
 
         self.pnl_history = np.zeros(1000, dtype=np.float32)
         self.pnl_index = 0
 
         self.peak_balance = self.current_balance
-        self.drawdown_start = None
+        self.drawdown_start: Optional[datetime] = None
         self.max_drawdown = 0.0
 
         self.daily_trades = 0
@@ -48,13 +48,11 @@ class UltraFastRiskManager:
 
         win_rate = getattr(self.config, "assumed_win_rate", 0.55)
         reward_risk = getattr(self.config, "assumed_rr_ratio", 1.5)
-        # Fórmula de Kelly
         kelly = (win_rate * reward_risk - (1 - win_rate)) / reward_risk
         kelly = max(0.0, min(kelly, getattr(self.config, "kelly_cap", 0.25)))
 
         base_pct = kelly * confidence * self.config.max_position_pct
 
-        # Ajuste por volatilidade
         if volatility < 0.01:
             vol_factor = 1.2
         elif volatility < 0.02:
@@ -66,8 +64,6 @@ class UltraFastRiskManager:
         base_pct *= vol_factor
 
         value = self.current_balance * base_pct
-
-        # Limites mínimo e máximo
         min_usd = getattr(self.config, "min_trade_usd", 50.0)
         max_pct_per_trade = getattr(self.config, "max_pct_per_trade", 0.10)
         value = max(min_usd, min(value, self.current_balance * max_pct_per_trade))
@@ -193,15 +189,13 @@ class MarketConditionValidator:
         market_data: Dict,
         client=None
     ) -> Tuple[bool, List[str]]:
-        """Executa todas as checagens e retorna (is_safe, reasons)"""
         now = time.time()
         if getattr(self.config, "debug_mode", False):
             return True, []
 
-        # 1. Volatilidade
         prices = market_data.get('prices')
         if prices is not None and len(prices) >= 100:
-            arr = np.array(prices[-100:], dtype=np.float64)
+            arr = np.asarray(prices[-100:], dtype=np.float64)
             vol = float(np.std(arr) / np.mean(arr))
             self.vol_history.append(vol)
             if vol > self.config.max_volatility:
@@ -211,7 +205,6 @@ class MarketConditionValidator:
                 self.reasons.append(f"Volatilidade elevada: {vol*100:.2f}%")
                 self.score -= 15
 
-        # 2. Spread
         asks = market_data.get('orderbook_asks', [])
         bids = market_data.get('orderbook_bids', [])
         if (asks is not None and bids is not None
@@ -226,7 +219,6 @@ class MarketConditionValidator:
                 self.reasons.append(f"Spread elevado: {sp:.1f} bps")
                 self.score -= 10
 
-        # 3. Volume 24h
         if client and now - self.last_check > self.check_interval:
             try:
                 ticker = await client.get_ticker(symbol=self.config.symbol)
@@ -239,7 +231,6 @@ class MarketConditionValidator:
                 pass
             self.last_check = now
 
-        # 4. Liquidez
         if len(asks) < 5 or len(bids) < 5:
             self.reasons.append("Orderbook raso")
             self.score -= 15
@@ -250,7 +241,6 @@ class MarketConditionValidator:
                 self.reasons.append("Baixa liquidez")
                 self.score -= 15
 
-        # 5. Horário de trading
         hour = datetime.utcnow().hour
         if 2 <= hour <= 6:
             self.reasons.append("Baixa liquidez (2-6 UTC)")
@@ -259,20 +249,17 @@ class MarketConditionValidator:
             self.reasons.append("Domingo - liquidez reduzida")
             self.score -= 10
 
-        # 6. Flash crash
         if prices is not None and len(prices) >= 50:
             recent = np.mean(prices[-10:])
             older = np.mean(prices[-50:-40])
-            if older > 0 and abs(recent - older) / older > 0.05:
+            if older > 0 and abs(recent - older)/older > 0.05:
                 self.reasons.append("⚠️ FLASH CRASH DETECTADO")
                 self.score = 0
 
-        # Ajuste final
         self.score = max(0.0, self.score)
         self.is_safe = (self.score >= getattr(self.config, "min_market_score", 50.0))
         return self.is_safe, self.reasons
 
-    # --- stub para compatibilidade com main.py ---
     async def validate_market_conditions(
         self,
         market_data: Dict,
