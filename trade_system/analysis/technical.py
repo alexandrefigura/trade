@@ -92,7 +92,6 @@ def calculate_bollinger_bands_fast(
     std = np.empty(n, dtype=np.float32)
     std[:period-1] = np.nan
     for i in range(period-1, n):
-        # cálculo de desvio padrão na janela [i-period+1, i]
         acc = 0.0
         acc2 = 0.0
         for j in range(i-period+1, i+1):
@@ -116,7 +115,7 @@ def detect_patterns_fast(prices: np.ndarray, volumes: np.ndarray) -> int:
     # volume spike
     avg_vol = 0.0
     for i in range(-20, 0):
-        avg_vol += volumes[volumes.shape[0]+i]
+        avg_vol += volumes[volumes.shape[0] + i]
     avg_vol /= 20.0
     spike = volumes[-1] > avg_vol * 1.5
     # breakout
@@ -157,8 +156,10 @@ class UltraFastTechnicalAnalysis:
         self.config = config
         self.last_calc = 0.0
         self.interval = config.ta_interval_ms / 1000.0
-        self._cached = ('HOLD', 0.5, {'cached': True})
-        self.signals_count = {'BUY':0, 'SELL':0, 'HOLD':0}
+        self._cached: Tuple[str, float, Dict] = ('HOLD', 0.5, {'cached': True})
+        self.signals_count = {'BUY': 0, 'SELL': 0, 'HOLD': 0}
+
+        logger.info("⚡ UltraFastTechnicalAnalysis inicializado")
 
     def analyze(
         self,
@@ -172,18 +173,20 @@ class UltraFastTechnicalAnalysis:
         if now - self.last_calc < self.interval:
             return self._cached
 
-        # filtros
+        # filtros pré-indicadores
         if not self.config.debug_mode:
-            filt = filter_low_volume_and_volatility(
-                prices, volumes,
+            pre = filter_low_volume_and_volatility(
+                prices,
+                volumes,
                 self.config.min_volume_multiplier,
                 self.config.max_recent_volatility
             )
-            if filt is not None:
-                return filt
+            if pre is not None:
+                return pre
 
         start = time.perf_counter()
-        # indicadores
+
+        # cálculos ultra-rápidos
         sma_s = calculate_sma_fast(prices, self.config.sma_short_period)
         sma_l = calculate_sma_fast(prices, self.config.sma_long_period)
         ema_s = calculate_ema_fast(prices, self.config.ema_short_period)
@@ -194,50 +197,69 @@ class UltraFastTechnicalAnalysis:
         )
         pat = detect_patterns_fast(prices, volumes)
 
-        signals = []
-        confs   = []
-        reasons = []
+        signals:  list = []
+        confs:    list = []
+        reasons:  list = []
 
         # RSI
-        cri = rsi[-1]
-        if cri < self.config.rsi_buy_threshold:
-            signals.append(1); confs.append(self.config.rsi_confidence); reasons.append(f"RSI {cri:.1f}<buy")
-        elif cri > self.config.rsi_sell_threshold:
-            signals.append(-1); confs.append(self.config.rsi_confidence); reasons.append(f"RSI {cri:.1f}>sell")
+        last_rsi = rsi[-1]
+        if last_rsi < self.config.rsi_buy_threshold:
+            signals.append(1)
+            confs.append(self.config.rsi_confidence)
+            reasons.append(f"RSI {last_rsi:.1f}<buy")
+        elif last_rsi > self.config.rsi_sell_threshold:
+            signals.append(-1)
+            confs.append(self.config.rsi_confidence)
+            reasons.append(f"RSI {last_rsi:.1f}>sell")
 
         # EMA cross
         if ema_s[-2] <= ema_l[-2] and ema_s[-1] > ema_l[-1]:
-            signals.append(1); confs.append(self.config.sma_cross_confidence); reasons.append("EMA cross up")
+            signals.append(1)
+            confs.append(self.config.sma_cross_confidence)
+            reasons.append("EMA cross up")
         elif ema_s[-2] >= ema_l[-2] and ema_s[-1] < ema_l[-1]:
-            signals.append(-1); confs.append(self.config.sma_cross_confidence); reasons.append("EMA cross down")
+            signals.append(-1)
+            confs.append(self.config.sma_cross_confidence)
+            reasons.append("EMA cross down")
 
         # Bollinger
         price = prices[-1]
         if price < bb_l[-1] * 0.998:
-            signals.append(1); confs.append(self.config.bb_confidence); reasons.append("BB lower")
+            signals.append(1)
+            confs.append(self.config.bb_confidence)
+            reasons.append("BB lower")
         elif price > bb_u[-1] * 1.002:
-            signals.append(-1); confs.append(self.config.bb_confidence); reasons.append("BB upper")
+            signals.append(-1)
+            confs.append(self.config.bb_confidence)
+            reasons.append("BB upper")
 
         # Pattern
         if pat != 0:
-            signals.append(pat); confs.append(self.config.pattern_confidence)
-            reasons.append("Pattern bullish" if pat>0 else "Pattern bearish")
+            signals.append(pat)
+            confs.append(self.config.pattern_confidence)
+            reasons.append("Pattern bullish" if pat > 0 else "Pattern bearish")
 
-        # consolidar
+        # consolidação de sinais
         if not signals:
-            action = 'HOLD'; overall_conf = 0.5
+            action, overall_conf = 'HOLD', 0.5
         else:
             arr = np.array(signals, dtype=np.float32)
             wts = np.array(confs,   dtype=np.float32)
-            score = np.average(arr, weights=wts) if wts.sum()>0 else 0.0
+            score = np.average(arr, weights=wts) if wts.sum() > 0 else 0.0
             overall_conf = float(wts.mean())
-            action = 'BUY' if score > self.config.buy_threshold else 'SELL' if score < -self.config.sell_threshold else 'HOLD'
+            if score > self.config.buy_threshold:
+                action = 'BUY'
+            elif score < -self.config.sell_threshold:
+                action = 'SELL'
+            else:
+                action = 'HOLD'
 
         # logging
         if action != 'HOLD':
             logger.info(f"📊 TA Sinal: {action} (conf {overall_conf:.2%})")
+
         details = {
-            'rsi': float(cri),
+            'rsi': float(last_rsi),
             'sma_short': float(sma_s[-1]),
             'sma_long':  float(sma_l[-1]),
             'ema_short': float(ema_s[-1]),
@@ -247,20 +269,21 @@ class UltraFastTechnicalAnalysis:
             'bb_lower':  float(bb_l[-1]),
             'pattern':   int(pat),
             'reasons':   reasons,
-            'calc_ms':   (time.perf_counter()-start)*1000.0
+            'calc_ms':   (time.perf_counter() - start) * 1000.0
         }
 
-        # cache & contadores
+        # cache & contagem
         self.last_calc = now
         self._cached = (action, overall_conf, details)
         self.signals_count[action] += 1
+
         return action, overall_conf, details
 
     def get_signal_stats(self) -> Dict:
         total = sum(self.signals_count.values())
         return {
             'total': total,
-            'buy': self.signals_count['BUY'],
-            'sell': self.signals_count['SELL'],
-            'hold': self.signals_count['HOLD']
+            'buy':   self.signals_count['BUY'],
+            'sell':  self.signals_count['SELL'],
+            'hold':  self.signals_count['HOLD']
         }
