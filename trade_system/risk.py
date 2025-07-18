@@ -48,11 +48,13 @@ class UltraFastRiskManager:
 
         win_rate = getattr(self.config, "assumed_win_rate", 0.55)
         reward_risk = getattr(self.config, "assumed_rr_ratio", 1.5)
+        # Fórmula de Kelly
         kelly = (win_rate * reward_risk - (1 - win_rate)) / reward_risk
         kelly = max(0.0, min(kelly, getattr(self.config, "kelly_cap", 0.25)))
 
         base_pct = kelly * confidence * self.config.max_position_pct
 
+        # Ajuste por volatilidade
         if volatility < 0.01:
             vol_factor = 1.2
         elif volatility < 0.02:
@@ -65,6 +67,7 @@ class UltraFastRiskManager:
 
         value = self.current_balance * base_pct
 
+        # Limites mínimo e máximo
         min_usd = getattr(self.config, "min_trade_usd", 50.0)
         max_pct_per_trade = getattr(self.config, "max_pct_per_trade", 0.10)
         value = max(min_usd, min(value, self.current_balance * max_pct_per_trade))
@@ -211,7 +214,6 @@ class MarketConditionValidator:
         # 2. Spread
         asks = market_data.get('orderbook_asks', [])
         bids = market_data.get('orderbook_bids', [])
-        # Corrigido: checar tamanho antes de acessar elementos
         if (asks is not None and bids is not None
                 and len(asks) > 0 and len(bids) > 0
                 and asks[0][0] > 0 and bids[0][0] > 0):
@@ -224,7 +226,7 @@ class MarketConditionValidator:
                 self.reasons.append(f"Spread elevado: {sp:.1f} bps")
                 self.score -= 10
 
-        # 3. Volume 24h (quando cliente fornecido e intervalo expirado)
+        # 3. Volume 24h
         if client and now - self.last_check > self.check_interval:
             try:
                 ticker = await client.get_ticker(symbol=self.config.symbol)
@@ -242,8 +244,8 @@ class MarketConditionValidator:
             self.reasons.append("Orderbook raso")
             self.score -= 15
         else:
-            bid_vol = sum([lvl[1] for lvl in bids[:5]])
-            ask_vol = sum([lvl[1] for lvl in asks[:5]])
+            bid_vol = sum(lvl[1] for lvl in bids[:5])
+            ask_vol = sum(lvl[1] for lvl in asks[:5])
             if bid_vol < 10 or ask_vol < 10:
                 self.reasons.append("Baixa liquidez")
                 self.score -= 15
@@ -261,10 +263,11 @@ class MarketConditionValidator:
         if prices is not None and len(prices) >= 50:
             recent = np.mean(prices[-10:])
             older = np.mean(prices[-50:-40])
-            if older > 0 and abs(recent - older)/older > 0.05:
+            if older > 0 and abs(recent - older) / older > 0.05:
                 self.reasons.append("⚠️ FLASH CRASH DETECTADO")
                 self.score = 0
 
+        # Ajuste final
         self.score = max(0.0, self.score)
         self.is_safe = (self.score >= getattr(self.config, "min_market_score", 50.0))
         return self.is_safe, self.reasons
@@ -275,10 +278,6 @@ class MarketConditionValidator:
         market_data: Dict,
         client=None
     ) -> Tuple[bool, List[str]]:
-        """
-        Chamada compatível com main.py:
-            is_safe, reasons = await validator.validate_market_conditions(...)
-        """
         return await self.validate(market_data, client)
 
     def get_market_health(self) -> Dict:
