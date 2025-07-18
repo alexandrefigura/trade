@@ -5,6 +5,7 @@ import os
 import asyncio
 import signal
 from datetime import datetime
+import numpy as np              # <— adicione esta linha
 from typing import Optional
 from trade_system.config import get_config
 from trade_system.logging_config import setup_logging, get_logger
