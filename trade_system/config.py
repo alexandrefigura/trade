@@ -1,6 +1,9 @@
 """
 Configuração centralizada do sistema de trading
 """
+from dotenv import load_dotenv
+load_dotenv()  # carrega as variáveis do .env para os.environ
+
 import os
 import yaml
 import logging
@@ -15,78 +18,78 @@ logger = logging.getLogger(__name__)
 class UltraConfigV5:
     """Configuração para máxima performance"""
     # APIs
-    api_key: str = ""
-    api_secret: str = ""
+    api_key: str = os.getenv('BINANCE_API_KEY', '')
+    api_secret: str = os.getenv('BINANCE_API_SECRET', '')
     
     # Trading
-    symbol: str = "BTCUSDT"
-    min_confidence: float = 0.75
-    max_position_pct: float = 0.02
+    symbol: str = os.getenv('TRADING_SYMBOL', 'BTCUSDT')
+    min_confidence: float = float(os.getenv('MIN_CONFIDENCE', 0.75))
+    max_position_pct: float = float(os.getenv('MAX_POSITION_PCT', 0.02))
 
     # Parâmetros de Technical Analysis
-    ta_interval_ms: int = 5000
-    sma_short_period: int = 9
-    sma_long_period: int = 20
-    ema_short_period: int = 9
-    ema_long_period: int = 20
-    rsi_period: int = 14
-    rsi_buy_threshold: float = 30.0
-    rsi_sell_threshold: float = 70.0
-    rsi_confidence: float = 0.8
-    sma_cross_confidence: float = 0.75
-    bb_period: int = 20
-    bb_std_dev: float = 2.0
-    bb_confidence: float = 0.7
-    pattern_confidence: float = 0.85
-    buy_threshold: float = 0.3
-    sell_threshold: float = 0.3
+    ta_interval_ms: int = int(os.getenv('TA_INTERVAL_MS', 5000))
+    sma_short_period: int = int(os.getenv('SMA_SHORT_PERIOD', 9))
+    sma_long_period: int = int(os.getenv('SMA_LONG_PERIOD', 20))
+    ema_short_period: int = int(os.getenv('EMA_SHORT_PERIOD', 9))
+    ema_long_period: int = int(os.getenv('EMA_LONG_PERIOD', 20))
+    rsi_period: int = int(os.getenv('RSI_PERIOD', 14))
+    rsi_buy_threshold: float = float(os.getenv('RSI_BUY_THRESHOLD', 30.0))
+    rsi_sell_threshold: float = float(os.getenv('RSI_SELL_THRESHOLD', 70.0))
+    rsi_confidence: float = float(os.getenv('RSI_CONFIDENCE', 0.8))
+    sma_cross_confidence: float = float(os.getenv('SMA_CROSS_CONFIDENCE', 0.75))
+    bb_period: int = int(os.getenv('BB_PERIOD', 20))
+    bb_std_dev: float = float(os.getenv('BB_STD_DEV', 2.0))
+    bb_confidence: float = float(os.getenv('BB_CONFIDENCE', 0.7))
+    pattern_confidence: float = float(os.getenv('PATTERN_CONFIDENCE', 0.85))
+    buy_threshold: float = float(os.getenv('BUY_THRESHOLD', 0.3))
+    sell_threshold: float = float(os.getenv('SELL_THRESHOLD', 0.3))
 
     # Filtros
-    min_volume_multiplier: float = 1.0
-    max_recent_volatility: float = 0.05
+    min_volume_multiplier: float = float(os.getenv('MIN_VOLUME_MULTIPLIER', 1.0))
+    max_recent_volatility: float = float(os.getenv('MAX_RECENT_VOLATILITY', 0.05))
 
     # ATR parameters
-    atr_period: int = 14
-    tp_multiplier: float = 1.5
-    sl_multiplier: float = 1.0
+    atr_period: int = int(os.getenv('ATR_PERIOD', 14))
+    tp_multiplier: float = float(os.getenv('TP_MULTIPLIER', 1.5))
+    sl_multiplier: float = float(os.getenv('SL_MULTIPLIER', 1.0))
 
     # Performance
-    use_redis: bool = True
-    redis_host: str = "localhost"
-    redis_port: int = 6379
+    use_redis: bool = os.getenv('USE_REDIS', 'True').lower() in ('true', '1', 'yes')
+    redis_host: str = os.getenv('REDIS_HOST', 'localhost')
+    redis_port: int = int(os.getenv('REDIS_PORT', 6379))
 
     # Processamento paralelo
-    num_workers: int = mp.cpu_count()
-    batch_size: int = 1000
+    num_workers: int = int(os.getenv('NUM_WORKERS', mp.cpu_count()))
+    batch_size: int = int(os.getenv('BATCH_SIZE', 1000))
 
     # Buffers otimizados
-    price_buffer_size: int = 10000
-    orderbook_buffer_size: int = 100
+    price_buffer_size: int = int(os.getenv('PRICE_BUFFER_SIZE', 10000))
+    orderbook_buffer_size: int = int(os.getenv('ORDERBOOK_BUFFER_SIZE', 100))
 
     # Timing
-    main_loop_interval_ms: int = 1000
-    gc_interval_cycles: int = 1000
+    main_loop_interval_ms: int = int(os.getenv('MAIN_LOOP_INTERVAL_MS', 1000))
+    gc_interval_cycles: int = int(os.getenv('GC_INTERVAL_CYCLES', 1000))
 
     # Configuração avançada
-    rate_limit_window: int = 60
-    rate_limit_max_calls: int = 1200
+    rate_limit_window: int = int(os.getenv('RATE_LIMIT_WINDOW', 60))
+    rate_limit_max_calls: int = int(os.getenv('RATE_LIMIT_MAX_CALLS', 1200))
 
     # Proteções de mercado
-    max_volatility: float = 0.05
-    max_spread_bps: float = 20.0
-    min_volume_24h: int = 1_000_000
+    max_volatility: float = float(os.getenv('MAX_VOLATILITY', 0.05))
+    max_spread_bps: float = float(os.getenv('MAX_SPREAD_BPS', 20.0))
+    min_volume_24h: int = int(os.getenv('MIN_VOLUME_24H', 1_000_000))
 
     # Alertas
-    enable_alerts: bool = True
-    telegram_token: str = ""
-    telegram_chat_id: str = ""
-    alert_email: str = ""
+    enable_alerts: bool = os.getenv('ENABLE_ALERTS', 'True').lower() in ('true', '1', 'yes')
+    telegram_token: str = os.getenv('TELEGRAM_BOT_TOKEN', '')
+    telegram_chat_id: str = os.getenv('TELEGRAM_CHAT_ID', '')
+    alert_email: str = os.getenv('ALERT_EMAIL', '')
 
     # Risk management
-    max_daily_loss: float = 0.02
+    max_daily_loss: float = float(os.getenv('MAX_DAILY_LOSS', 0.02))
 
     # Debug mode
-    debug_mode: bool = False
+    debug_mode: bool = os.getenv('DEBUG_MODE', 'False').lower() in ('true', '1', 'yes')
 
 
 def load_config_from_yaml(config_path: str = 'config.yaml') -> Dict[str, Any]:
