@@ -1,51 +1,51 @@
-# Configuração do Sistema de Trading v5.2
+# ConfiguraÃ§Ã£o do Sistema de Trading v5.2
 
-# Modo debug (parâmetros mais agressivos)
-debug_mode: false
+# Modo debug (parÃ¢metros mais agressivos)
+debug_mode: true
 
 trading:
   symbol: "BTCUSDT"
-  min_confidence: 0.75  # Confiança mínima para abrir posição (75%)
-  max_position_pct: 0.02  # Máximo 2% do balance por posição
+  min_confidence: 0.40       # Reduzido para permitir mais operaÃ§Ãµes
+  max_position_pct: 0.05     # AtÃ© 5% do saldo por trade
 
 risk:
-  max_volatility: 0.05  # Máxima volatilidade aceita (5%)
-  max_spread_bps: 20  # Máximo spread em basis points
-  max_daily_loss: 0.02  # Stop loss diário (2%)
-  atr_period: 14  # Período para cálculo do ATR
-  tp_multiplier: 1.5  # Take profit em 1.5x ATR
-  sl_multiplier: 1.0  # Stop loss em 1x ATR
+  max_volatility: 0.50       # TolerÃ¢ncia maior Ã  volatilidade
+  max_spread_bps: 50         # Aceita spreads maiores
+  max_daily_loss: 0.05       # Permite perder atÃ© 5% no dia
+  atr_period: 14
+  tp_multiplier: 1.5
+  sl_multiplier: 1.0
 
 ta:
   # RSI
   rsi_period: 14
-  rsi_buy_threshold: 30  # Compra quando RSI < 30
-  rsi_sell_threshold: 70  # Venda quando RSI > 70
-  rsi_confidence: 0.8
-  
-  # Moving Averages
+  rsi_buy_threshold: 45       # Mais fÃ¡cil de comprar
+  rsi_sell_threshold: 55      # Mais fÃ¡cil de vender
+  rsi_confidence: 0.50
+
+  # MÃ©dias mÃ³veis
   sma_short_period: 9
   sma_long_period: 20
   ema_short_period: 9
   ema_long_period: 20
-  sma_cross_confidence: 0.75
-  
+  sma_cross_confidence: 0.50
+
   # Bollinger Bands
   bb_period: 20
   bb_std_dev: 2.0
-  bb_confidence: 0.7
-  
+  bb_confidence: 0.50
+
   # Pattern Detection
-  pattern_confidence: 0.85
-  
-  # Thresholds para decisão final
-  buy_threshold: 0.3
-  sell_threshold: 0.3
+  pattern_confidence: 0.50
+
+  # Thresholds para decisÃ£o final
+  buy_threshold: 0.05
+  sell_threshold: 0.05
 
 filters:
-  min_volume_multiplier: 1.0  # Volume mínimo em relação à média
-  max_recent_volatility: 0.05  # Máxima volatilidade recente (5%)
+  min_volume_multiplier: 0.1     # Permite operar com volume reduzido
+  max_recent_volatility: 0.50
 
 performance:
-  ta_interval_ms: 5000  # Intervalo mínimo entre análises técnicas
-  main_loop_interval_ms: 1000  # Intervalo do loop principal
+  ta_interval_ms: 5000
+  main_loop_interval_ms: 1000
