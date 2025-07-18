@@ -86,7 +86,7 @@ TELEGRAM_CHAT_ID=seu_chat_id_aqui
 """
 
 if not env_file.exists():
-    with open(env_file, 'w') as f:
+    with open(env_file, 'w', encoding='utf-8') as f:
         f.write(telegram_config)
     print("✅ Arquivo .env criado")
     print("⚠️  IMPORTANTE: Edite .env e adicione seu token e chat_id do Telegram")
@@ -168,7 +168,7 @@ redis:
   use_redis: false  # Desabilitar Redis por enquanto
 """
 
-with open(config_yaml, 'w') as f:
+with open(config_yaml, 'w', encoding='utf-8') as f:
     f.write(aggressive_config)
 print("✅ config.yaml ajustado para paper trading agressivo")
 
@@ -213,7 +213,7 @@ if __name__ == "__main__":
     monitor_system()
 '''
 
-with open("monitor.py", "w") as f:
+with open("monitor.py", "w", encoding='utf-8') as f:
     f.write(monitor_script)
 print("✅ monitor.py criado")
 
@@ -247,7 +247,7 @@ else:
     print("❌ Reset cancelado")
 '''
 
-with open("reset_system.py", "w") as f:
+with open("reset_system.py", "w", encoding='utf-8') as f:
     f.write(reset_script)
 print("✅ reset_system.py criado")
 
