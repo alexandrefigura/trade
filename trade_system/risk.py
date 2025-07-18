@@ -223,7 +223,7 @@ class MarketConditionValidator:
     ) -> Tuple[bool, List[str]]:
         """Executa todas as checagens e retorna (is_safe, reasons)"""
         now = time.time()
-        if getattr(self.config, "debug_mode", False):
+        if self.config.debug_mode:
             return True, []
 
         # 1. Volatilidade
@@ -282,20 +282,10 @@ class MarketConditionValidator:
         self.is_safe = (self.score >= getattr(self.config, "min_market_score", 50.0))
         return self.is_safe, self.reasons
 
-    # Alias adicionado para compatibilidade com main.py
-    async def validate_market_conditions(
-        self,
-        market_data: Dict,
-        client=None
-    ) -> Tuple[bool, List[str]]:
-        """
-        Deprecated: use `validate()`. Mantido para compatibilidade com main.py.
-        """
-        return await self.validate(market_data, client)
-
     def _get_volatility(self, data: Dict) -> Optional[float]:
         prices = data.get('prices')
-        if prices and len(prices) >= 100:
+        # não usar truthiness de array, verificar explicitamente
+        if prices is not None and len(prices) >= 100:
             arr = np.array(prices[-100:], dtype=np.float64)
             return float(np.std(arr) / np.mean(arr))
         return None
@@ -303,7 +293,9 @@ class MarketConditionValidator:
     def _get_spread(self, data: Dict) -> Optional[float]:
         asks = data.get('orderbook_asks')
         bids = data.get('orderbook_bids')
-        if asks and bids and asks[0][0] > 0 and bids[0][0] > 0:
+        # checar explicitamente listas não-nulas e não-vazias
+        if asks is not None and bids is not None and len(asks) and len(bids) \
+           and asks[0][0] > 0 and bids[0][0] > 0:
             sp = (asks[0][0] - bids[0][0]) / bids[0][0] * 10000
             return float(sp)
         return None
@@ -329,7 +321,8 @@ class MarketConditionValidator:
 
     def _detect_flash_crash(self, data: Dict) -> bool:
         prices = data.get('prices')
-        if prices and len(prices) >= 50:
+        # mesma correção de truthiness
+        if prices is not None and len(prices) >= 50:
             recent = np.mean(prices[-10:])
             older = np.mean(prices[-50:-40])
             if older > 0 and abs(recent - older) / older > 0.05:
@@ -342,6 +335,6 @@ class MarketConditionValidator:
             'is_safe': self.is_safe,
             'reasons': self.reasons,
             'avg_volatility': np.mean(self.vol_history[-10:]) if self.vol_history else 0.0,
-            'avg_spread': np.mean(self.spread_history[-10:]) if self.spread_history else 0.0,
+            'avg_spread':    np.mean(self.spread_history[-10:]) if self.spread_history else 0.0,
             'last_volume_24h': self.vol24h_history[-1] if self.vol24h_history else 0.0
         }
