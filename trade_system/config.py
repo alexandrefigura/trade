@@ -136,11 +136,13 @@ def get_config(debug_mode: bool = False) -> TradingConfig:
     if yaml_cfg:
         for section in yaml_cfg:
             values = yaml_cfg.get(section, {})
-            for key, val in values.items():
-                if hasattr(base, key):
-                    setattr(base, key, val)
+            if isinstance(values, dict):
+                for key, val in values.items():
+                    if hasattr(base, key):
+                        setattr(base, key, val)
+            elif hasattr(base, section):
+                setattr(base, section, values)
 
-    # Env vars
     base.api_key = os.getenv("BINANCE_API_KEY", base.api_key)
     base.api_secret = os.getenv("BINANCE_API_SECRET", base.api_secret)
     base.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", base.telegram_token)
