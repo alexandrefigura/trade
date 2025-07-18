@@ -5,7 +5,6 @@ import os
 import sys
 import asyncio
 import argparse
-from datetime import datetime
 from typing import Optional
 
 # Adicionar diretório pai ao path se necessário
@@ -13,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_system.config import get_config, create_example_config
 from trade_system.logging_config import setup_logging
-from trade_system.paper_trader import PaperTrader, gerar_sinais_simulados
+from trade_system.main import run_paper_trading
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -28,7 +27,7 @@ Exemplos:
   python -m trade_system.cli paper                 # Inicia paper trading
   python -m trade_system.cli paper --no-backtest   # Paper trading sem backtest
   python -m trade_system.cli config                # Cria config.yaml exemplo
-"""
+        """
     )
 
     subparsers = parser.add_subparsers(dest='command', help='Comandos disponíveis')
@@ -59,7 +58,7 @@ Exemplos:
     )
     paper_parser.add_argument(
         '--no-backtest', action='store_true',
-        help='Pular backtest inicial'
+        help='Pular validação de backtest inicial'
     )
     paper_parser.add_argument(
         '--balance', type=float, default=10000,
@@ -93,14 +92,20 @@ Exemplos:
 
 async def run_backtest_command(args):
     """Executa comando de backtest"""
+    from trade_system.backtester import run_backtest_validation
+
     print("""
 ╔══════════════════════════════════════════════════════════════╗
 ║                    MODO BACKTEST                             ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
-    # TODO: Integrar backtester
-    print("❌ Backtest ainda não implementado nesta versão modular")
-    print("Em desenvolvimento...")
+    results = await run_backtest_validation(
+        config=get_config(debug_mode=args.debug),
+        days=args.days,
+        debug_mode=args.debug
+    )
+    if results:
+        print(f"✅ Backtest finalizado: {results['num_trades']} trades, ROI {results.get('total_return', 0):.2%}")
 
 
 async def run_paper_trading_command(args):
@@ -112,25 +117,22 @@ async def run_paper_trading_command(args):
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
-    # Instanciar PaperTrader
-    trader = PaperTrader(capital_inicial=args.balance)
+    config = get_config(debug_mode=args.debug)
+    # Executa validação de backtest, se não for pulado
+    if not args.no_backtest:
+        from trade_system.backtester import run_backtest_validation
+        await run_backtest_validation(
+            config=config,
+            days=7,
+            debug_mode=args.debug
+        )
 
-    # Executar sinais simulados
-    for sinal in gerar_sinais_simulados():
-        try:
-            if sinal['tipo'] == 'BUY':
-                trader.comprar(sinal['symbol'], sinal['quantidade'])
-            else:
-                trader.vender(sinal['symbol'], sinal['quantidade'])
-        except ValueError as e:
-            print(f"⚠️ Ignorado {sinal['tipo']} {sinal['symbol']}: {e}")
-
-    # Exibir resultado
-    resumo = trader.resumo()
-    print("\n▶ RESULTADO FINAL:")
-    print(f"Capital restante: {resumo['capital_restante']}")
-    print(f"Posições: {resumo['posicoes']}")
-    print(f"Operações simuladas: {resumo['operacoes']}")
+    # Inicia paper trading completo
+    await run_paper_trading(
+        config=config,
+        initial_balance=args.balance,
+        debug_mode=args.debug
+    )
 
 
 def run_config_command(args):
@@ -163,12 +165,10 @@ def main():
     # Configurar logging
     setup_logging(log_level=args.log_level)
 
-    # Se nenhum comando, exibe help
     if not args.command:
         parser.print_help()
         sys.exit(0)
 
-    # Disparar comandos
     if args.command == 'backtest':
         asyncio.run(run_backtest_command(args))
     elif args.command == 'paper':
