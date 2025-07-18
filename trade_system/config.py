@@ -1,206 +1,155 @@
 """
-Configuração centralizada do sistema de trading
+Gestão de risco ultra-rápida e validação de condições de mercado
 """
-from dotenv import load_dotenv
-load_dotenv()
+import time
+import numpy as np
+from datetime import datetime
+from typing import Dict, Tuple, List, Optional
+from trade_system.logging_config import get_logger
 
-import os
-import yaml
-import logging
-import multiprocessing as mp
-from dataclasses import dataclass
-from typing import Optional, Dict, Any
-
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
-@dataclass
-class UltraConfigV5:
-    """Configuração para máxima performance"""
-    api_key: str = ""
-    api_secret: str = ""
+class UltraFastRiskManager:
+    """Gestão de risco com cálculos otimizados"""
 
-    # Trading
-    symbol: str = "BTCUSDT"
-    min_confidence: float = 0.75
-    max_position_pct: float = 0.05  # Aumentado para facilitar testes
+    def __init__(self, config):
+        self.config = config
+        self.initial_balance = getattr(config, "initial_balance", 10000.0)
+        self.current_balance = self.initial_balance
+        self.daily_pnl = 0.0
+        self.max_daily_loss = config.max_daily_loss
+        self.position_info: Optional[Dict] = None
 
-    # TA
-    ta_interval_ms: int = 5000
-    sma_short_period: int = 9
-    sma_long_period: int = 20
-    ema_short_period: int = 9
-    ema_long_period: int = 20
-    rsi_period: int = 14
-    rsi_buy_threshold: float = 30.0
-    rsi_sell_threshold: float = 70.0
-    rsi_confidence: float = 0.8
-    sma_cross_confidence: float = 0.75
-    bb_period: int = 20
-    bb_std_dev: float = 2.0
-    bb_confidence: float = 0.7
-    pattern_confidence: float = 0.85
-    buy_threshold: float = 0.3
-    sell_threshold: float = 0.3
+        self.pnl_history = np.zeros(1000, dtype=np.float32)
+        self.pnl_index = 0
 
-    # Filtros
-    min_volume_multiplier: float = 1.0
-    max_recent_volatility: float = 0.1  # Relaxado para facilitar simulações
+        self.peak_balance = self.current_balance
+        self.drawdown_start: Optional[datetime] = None
+        self.max_drawdown = 0.0
 
-    # ATR / Risk
-    atr_period: int = 14
-    tp_multiplier: float = 1.5
-    sl_multiplier: float = 1.0
+        self.daily_trades = 0
+        self.last_reset_day = datetime.now().date()
 
-    # Redis
-    use_redis: bool = True
-    redis_host: str = "localhost"
-    redis_port: int = 6379
+        self.max_positions = getattr(config, "max_positions", 1)
+        self.current_positions = 0
 
-    # Processamento paralelo
-    num_workers: int = mp.cpu_count()
-    batch_size: int = 1000
+        logger.info(f"💰 Risk Manager inicializado - Balance: ${self.current_balance:,.2f}")
 
-    # Buffers
-    price_buffer_size: int = 10000
-    orderbook_buffer_size: int = 100
+    def calculate_position_size(self, confidence: float, volatility: float, current_price: Optional[float] = None) -> float:
+        self._check_daily_reset()
+        if not self._check_risk_limits():
+            return 0.0
 
-    # Intervalos
-    main_loop_interval_ms: int = 1000
-    gc_interval_cycles: int = 1000
+        win_rate = getattr(self.config, "assumed_win_rate", 0.55)
+        reward_risk = getattr(self.config, "assumed_rr_ratio", 1.5)
+        kelly = (win_rate * reward_risk - (1 - win_rate)) / reward_risk
+        kelly = max(0.0, min(kelly, getattr(self.config, "kelly_cap", 0.25)))
 
-    # Rate Limiting
-    rate_limit_window: int = 60
-    rate_limit_max_calls: int = 1200
+        base_pct = kelly * confidence * self.config.max_position_pct
 
-    # Validações de mercado
-    max_volatility: float = 0.1  # Relaxado
-    max_spread_bps: float = 20.0
-    min_volume_24h: int = 1_000_000
+        vol_factor = 1.0
+        if volatility < 0.01:
+            vol_factor = 1.2
+        elif volatility < 0.02:
+            vol_factor = 1.0
+        elif volatility < 0.03:
+            vol_factor = 0.5
+        else:
+            vol_factor = 0.3
+        base_pct *= vol_factor
 
-    # Alertas
-    enable_alerts: bool = True
-    telegram_token: str = ""
-    telegram_chat_id: str = ""
-    alert_email: str = ""
+        value = self.current_balance * base_pct
+        min_usd = getattr(self.config, "min_trade_usd", 50.0)
+        max_pct_per_trade = getattr(self.config, "max_pct_per_trade", 0.10)
+        value = max(min_usd, min(value, self.current_balance * max_pct_per_trade))
 
-    # Risco
-    max_daily_loss: float = 0.02
+        if current_price and value > 0:
+            qty = value / current_price
+            logger.info(f"[DEBUG] Pos size: ${value:.2f} | conf: {confidence:.2f} | vol: {volatility:.4f} | qty: {qty:.6f}")
 
-    # Debug
-    debug_mode: bool = True  # Ativado por padrão para simulações
+        return value
 
+    def _check_risk_limits(self) -> bool:
+        if self.daily_pnl < -self.max_daily_loss * self.initial_balance:
+            logger.warning(f"🔚 Stop daily loss atingido: ${self.daily_pnl:.2f}")
+            return False
+        if self.current_positions >= self.max_positions:
+            logger.debug("Máximo de posições simultâneas atingido")
+            return False
+        if self.current_balance < getattr(self.config, "min_balance_usd", 100.0):
+            logger.warning(f"Saldo insuficiente: ${self.current_balance:.2f}")
+            return False
+        return True
 
-def load_config_from_yaml(config_path: str = 'config.yaml') -> Dict[str, Any]:
-    try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f) or {}
-    except FileNotFoundError:
-        logger.warning(f"{config_path} não encontrado, usando configurações padrão")
-        return {}
-    except Exception as e:
-        logger.error(f"Erro ao carregar {config_path}: {e}")
-        return {}
+    def should_close_position(self, current_price: float, entry_price: float, side: str = 'BUY') -> Tuple[bool, str]:
+        if self.position_info is None:
+            return False, ""
 
+        pnl_pct = ((current_price - entry_price) / entry_price) if side == 'BUY' else ((entry_price - current_price) / entry_price)
+        highest = self.position_info.get('highest_pnl', 0.0)
+        if pnl_pct > highest:
+            self.position_info['highest_pnl'] = pnl_pct
 
-def create_debug_config() -> UltraConfigV5:
-    config = UltraConfigV5()
-    config.min_confidence = 0.40
-    config.rsi_buy_threshold = 45.0
-    config.rsi_sell_threshold = 55.0
-    config.rsi_confidence = 0.50
-    config.bb_confidence = 0.50
-    config.sma_cross_confidence = 0.50
-    config.pattern_confidence = 0.50
-    config.buy_threshold = 0.05
-    config.sell_threshold = 0.05
-    config.min_volume_multiplier = 0.1
-    config.max_recent_volatility = 0.50
-    config.max_volatility = 0.50
-    config.debug_mode = True
-    logger.warning("⚠️ MODO DEBUG - Parâmetros ultra-agressivos ativados!")
-    return config
+        tp = self.position_info.get('take_profit_pct', self.config.take_profit_pct)
+        sl = self.position_info.get('stop_loss_pct', self.config.stop_loss_pct)
+        if pnl_pct >= tp:
+            return True, "Take Profit"
+        if pnl_pct <= -sl:
+            return True, "Stop Loss"
 
+        if highest > getattr(self.config, "trailing_start_pct", 0.005):
+            trail_factor = getattr(self.config, "trailing_pct", 0.7)
+            if pnl_pct < highest * trail_factor:
+                return True, "Trailing Stop"
 
-def get_config(debug_mode: bool = False) -> UltraConfigV5:
-    config = create_debug_config() if debug_mode else UltraConfigV5()
-    yaml_cfg = load_config_from_yaml()
+        elapsed = time.time() - self.position_info.get('entry_time', time.time())
+        max_dur = self.position_info.get('max_duration', getattr(self.config, "max_position_duration", 3600))
+        if elapsed > max_dur and abs(pnl_pct) < getattr(self.config, "time_stop_pct", 0.002):
+            return True, "Time Stop"
 
-    if yaml_cfg:
-        for key in ('symbol', 'min_confidence', 'max_position_pct'):
-            if key in yaml_cfg.get('trading', {}):
-                setattr(config, key, yaml_cfg['trading'][key])
+        return False, ""
 
-        for key in ('max_volatility', 'max_spread_bps', 'max_daily_loss',
-                    'atr_period', 'tp_multiplier', 'sl_multiplier'):
-            if key in yaml_cfg.get('risk', {}):
-                setattr(config, key, yaml_cfg['risk'][key])
+    def update_after_trade(self, pnl: float, fees: float = 0.0):
+        self.daily_pnl += pnl
+        self.current_balance += pnl - fees
+        self.pnl_history[self.pnl_index % 1000] = pnl
+        self.pnl_index += 1
+        self.daily_trades += 1
 
-        for key, val in yaml_cfg.get('ta', {}).items():
-            if hasattr(config, key):
-                setattr(config, key, val)
+        if self.current_balance > self.peak_balance:
+            self.peak_balance = self.current_balance
+            self.drawdown_start = None
+        else:
+            if self.drawdown_start is None:
+                self.drawdown_start = datetime.now()
+            dd = (self.peak_balance - self.current_balance) / self.peak_balance
+            self.max_drawdown = max(self.max_drawdown, dd)
 
-        for key in ('min_volume_multiplier', 'max_recent_volatility'):
-            if key in yaml_cfg.get('filters', {}):
-                setattr(config, key, yaml_cfg['filters'][key])
+    def _check_daily_reset(self):
+        today = datetime.now().date()
+        if today > self.last_reset_day:
+            logger.info("📅 Reset diário de métricas")
+            self.daily_pnl = 0.0
+            self.daily_trades = 0
+            self.last_reset_day = today
 
-        for key in ('ta_interval_ms', 'main_loop_interval_ms'):
-            if key in yaml_cfg.get('performance', {}):
-                setattr(config, key, yaml_cfg['performance'][key])
+    def set_position(self, info: Dict):
+        self.position_info = info
+        self.current_positions = 1
 
-        if 'debug_mode' in yaml_cfg:
-            config.debug_mode = yaml_cfg['debug_mode']
+    def clear_position(self):
+        self.position_info = None
+        self.current_positions = 0
 
-    config.api_key = os.getenv('BINANCE_API_KEY', config.api_key)
-    config.api_secret = os.getenv('BINANCE_API_SECRET', config.api_secret)
-    config.telegram_token = os.getenv('TELEGRAM_BOT_TOKEN', config.telegram_token)
-    config.telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID', config.telegram_chat_id)
-
-    return config
-
-
-def create_example_config(config_path: str = 'config.yaml'):
-    example = """# Configuração do Sistema de Trading v5.2
-debug_mode: true
-
-trading:
-  symbol: "BTCUSDT"
-  min_confidence: 0.75
-  max_position_pct: 0.05
-
-risk:
-  max_volatility: 0.1
-  max_spread_bps: 20
-  max_daily_loss: 0.02
-  atr_period: 14
-  tp_multiplier: 1.5
-  sl_multiplier: 1.0
-
-ta:
-  rsi_period: 14
-  rsi_buy_threshold: 30
-  rsi_sell_threshold: 70
-  rsi_confidence: 0.8
-  sma_short_period: 9
-  sma_long_period: 20
-  ema_short_period: 9
-  ema_long_period: 20
-  sma_cross_confidence: 0.75
-  bb_period: 20
-  bb_std_dev: 2.0
-  bb_confidence: 0.7
-  pattern_confidence: 0.85
-  buy_threshold: 0.3
-  sell_threshold: 0.3
-
-filters:
-  min_volume_multiplier: 1.0
-  max_recent_volatility: 0.1
-
-performance:
-  ta_interval_ms: 5000
-  main_loop_interval_ms: 1000
-"""
-    with open(config_path, 'w', encoding='utf-8') as f:
-        f.write(example)
-    logger.info(f"Arquivo {config_path} criado com sucesso!")
+    def get_risk_metrics(self) -> Dict:
+        curr_dd = ((self.peak_balance - self.current_balance) / self.peak_balance) if self.peak_balance > 0 else 0.0
+        return {
+            'current_balance': self.current_balance,
+            'daily_pnl': self.daily_pnl,
+            'total_return': (self.current_balance - self.initial_balance) / self.initial_balance,
+            'max_drawdown': self.max_drawdown,
+            'current_drawdown': curr_dd,
+            'daily_trades': self.daily_trades,
+            'can_trade': self._check_risk_limits()
+        }
