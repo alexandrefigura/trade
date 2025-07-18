@@ -5,93 +5,164 @@ import os
 import sys
 import asyncio
 import argparse
+from typing import Optional
 
-# adiciona o diretório raiz do projeto ao PATH
+# Adicionar diretório pai ao path se necessário
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trade_system.config import get_config, create_example_config
 from trade_system.logging_config import setup_logging
-from trade_system.main import run_paper_trading, run_live_trading  # ou apenas run_paper_trading/backtest
+from trade_system.main import run_paper_trading
+
 
 def create_parser() -> argparse.ArgumentParser:
+    """Cria parser de argumentos"""
     parser = argparse.ArgumentParser(
         description='Sistema de Trading Ultra-Otimizado v5.2',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemplos:
-  trade-system backtest
-  trade-system paper
-  trade-system config --create
-        """
+  python -m trade_system.cli backtest              # Executa backtest
+  python -m trade_system.cli backtest --debug      # Backtest em modo debug
+  python -m trade_system.cli paper                 # Inicia paper trading
+  python -m trade_system.cli paper --no-backtest   # Paper trading sem backtest
+  python -m trade_system.cli config                # Cria config.yaml exemplo
+"""
     )
-    sub = parser.add_subparsers(dest='command', help='subcomandos')
 
-    # backtest
-    bt = sub.add_parser('backtest', help='Executa backtest de validação')
-    bt.add_argument('--debug', action='store_true', help='modo debug')
-    bt.add_argument('--days', type=int, default=7, help='dias de histórico')
+    subparsers = parser.add_subparsers(dest='command', help='Comandos disponíveis')
 
-    # paper
-    pt = sub.add_parser('paper', help='Inicia paper trading')
-    pt.add_argument('--debug', action='store_true', help='modo debug')
-    pt.add_argument('--no-backtest', action='store_true', help='pula validação')
-    pt.add_argument('--balance', type=float, default=10000, help='capital inicial')
+    # Backtest
+    backtest_parser = subparsers.add_parser(
+        'backtest', help='Executa backtest da estratégia'
+    )
+    backtest_parser.add_argument(
+        '--debug', action='store_true',
+        help='Modo debug com parâmetros agressivos'
+    )
+    backtest_parser.add_argument(
+        '--days', type=int, default=7,
+        help='Dias de dados históricos (padrão: 7)'
+    )
+    backtest_parser.add_argument(
+        '--symbol', type=str,
+        help='Par de trading (ex: BTCUSDT)'
+    )
 
-    # config
-    cfg = sub.add_parser('config', help='Gerencia config.yaml/.env')
-    cfg.add_argument('--create', action='store_true', help='cria config.yaml exemplo')
-    cfg.add_argument('--show', action='store_true', help='mostra valores atuais')
-    cfg.add_argument('--file', type=str, default='config.yaml', help='caminho ao YAML')
+    # Paper Trading
+    paper_parser = subparsers.add_parser(
+        'paper', help='Inicia paper trading com dados reais'
+    )
+    paper_parser.add_argument(
+        '--debug', action='store_true', help='Modo debug'
+    )
+    paper_parser.add_argument(
+        '--no-backtest', action='store_true',
+        help='Pular validação de backtest inicial'
+    )
+    paper_parser.add_argument(
+        '--balance', type=float, default=10000,
+        help='Balance inicial (padrão: 10000)'
+    )
 
-    # globais
-    parser.add_argument('--log-level', choices=['DEBUG','INFO','WARNING','ERROR'], default='INFO')
+    # Config
+    config_parser = subparsers.add_parser(
+        'config', help='Gerenciar configurações'
+    )
+    config_parser.add_argument(
+        '--create', action='store_true', help='Criar config.yaml exemplo'
+    )
+    config_parser.add_argument(
+        '--show', action='store_true', help='Mostrar configuração atual'
+    )
+
+    # Opções globais
+    parser.add_argument(
+        '--log-level',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+        default='INFO', help='Nível de logging'
+    )
+    parser.add_argument(
+        '--config-file', type=str, default='config.yaml',
+        help='Arquivo de configuração'
+    )
 
     return parser
 
 
-async def _cmd_backtest(args):
+async def run_backtest_command(args):
+    """Executa comando de backtest"""
     from trade_system.backtester import run_backtest_validation
-    cfg = get_config(debug_mode=args.debug)
-    print("=== MODO BACKTEST ===")
-    res = await run_backtest_validation(config=cfg, days=args.days, debug_mode=args.debug)
-    if res:
-        print(f"✅ Backtest: {res['num_trades']} trades | ROI {res.get('total_return',0):.2%}")
+
+    print("""
+╔══════════════════════════════════════════════════════════════════════╗
+║                    MODO BACKTEST                             ║
+╚══════════════════════════════════════════════════════════════════════╝
+""")
+    results = await run_backtest_validation(
+        config=get_config(debug_mode=args.debug),
+        days=args.days,
+        debug_mode=args.debug
+    )
+    if results:
+        print(f"✅ Backtest finalizado: {results['num_trades']} trades, ROI {results.get('total_return', 0):.2%}")
 
 
-async def _cmd_paper(args):
-    cfg = get_config(debug_mode=args.debug)
-    print("=== PAPER TRADING ===")
+async def run_paper_trading_command(args):
+    """Executa comando de paper trading"""
+    print("""
+╔══════════════════════════════════════════════════════════════════════╗
+║                  PAPER TRADING MODE                          ║
+║              Execução simulada com dados reais               ║
+╚══════════════════════════════════════════════════════════════════════╝
+""")
+
+    config = get_config(debug_mode=args.debug)
+    # Executa validação de backtest, se não for pulado
     if not args.no_backtest:
         from trade_system.backtester import run_backtest_validation
-        await run_backtest_validation(config=cfg, days=7, debug_mode=args.debug)
+        await run_backtest_validation(
+            config=config,
+            days=7,
+            debug_mode=args.debug
+        )
 
+    # Inicia paper trading completo
     await run_paper_trading(
-        config=cfg,
+        config=config,
         initial_balance=args.balance,
         debug_mode=args.debug
     )
 
 
-def _cmd_config(args):
+def run_config_command(args):
+    """Executa comando de configuração"""
+    cfg_file = args.config_file
     if args.create:
-        if os.path.exists(args.file):
-            c = input(f"{args.file} já existe. Sobrescrever? (s/n): ")
-            if c.lower()!='s':
-                print("Cancelado.")
+        if os.path.exists(cfg_file):
+            confirm = input(f"{cfg_file} já existe. Sobrescrever? (s/n): ")
+            if confirm.lower() != 's':
+                print("Operação cancelada.")
                 return
-        create_example_config(args.file)
-        print(f"✅ {args.file} criado.")
-        return
-    if args.show:
-        cfg = get_config(debug_mode=False)
-        print("CONFIG ATUAL:")
-        for k,v in vars(cfg).items():
-            print(f"  {k}: {v}")
+        create_example_config(cfg_file)
+        print(f"✅ {cfg_file} criado com sucesso!")
+        print("\n📝 Edite o arquivo para personalizar os parâmetros")
+    elif args.show:
+        config = get_config(debug_mode=getattr(args, 'debug', False))
+        print("\n📋 Configuração atual:")
+        print(f"Symbol: {config.symbol}")
+        print(f"Min confidence: {config.min_confidence}")
+        print(f"Max position: {config.max_position_pct*100}%")
+        print(f"Debug mode: {config.debug_mode}")
+        print(f"\nPara ver todas as configurações, abra {cfg_file}")
 
 
 def main():
+    """Função principal do CLI"""
     parser = create_parser()
     args = parser.parse_args()
+
+    # Configurar logging
     setup_logging(log_level=args.log_level)
 
     if not args.command:
@@ -99,11 +170,11 @@ def main():
         sys.exit(0)
 
     if args.command == 'backtest':
-        asyncio.run(_cmd_backtest(args))
+        asyncio.run(run_backtest_command(args))
     elif args.command == 'paper':
-        asyncio.run(_cmd_paper(args))
+        asyncio.run(run_paper_trading_command(args))
     elif args.command == 'config':
-        _cmd_config(args)
+        run_config_command(args)
 
 
 if __name__ == '__main__':
