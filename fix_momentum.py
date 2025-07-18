@@ -5,6 +5,10 @@ Script para corrigir o problema da feature momentum ausente
 
 import os
 import re
+from dotenv import load_dotenv
+
+# Carregar variáveis de ambiente
+load_dotenv()
 
 def fix_ml_file():
     """Remove a dependência da feature momentum do arquivo ML"""
@@ -126,14 +130,19 @@ def main():
     print("2. O sistema agora deve executar trades com 45% de confiança")
     print("3. Os warnings de momentum devem parar de aparecer")
     
-    print("\n⚠️ Para configurar o Telegram:")
-    print("1. Fale com @BotFather no Telegram para criar um bot")
-    print("2. Inicie uma conversa com seu bot")
-    print("3. Acesse: https://api.telegram.org/bot<TOKEN>/getUpdates")
-    print("4. Encontre o 'chat_id' na resposta")
-    print("5. Configure as variáveis de ambiente:")
-    print("   set TELEGRAM_BOT_TOKEN=seu_token")
-    print("   set TELEGRAM_CHAT_ID=seu_chat_id")
+    # Verificar configuração do Telegram
+    print("\n📱 Verificando configuração do Telegram...")
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+    
+    if bot_token and chat_id:
+        print(f"✅ Telegram configurado!")
+        print(f"   Bot Token: {bot_token[:20]}...")
+        print(f"   Chat ID: {chat_id}")
+        print("\n💡 Dica: Certifique-se de ter iniciado uma conversa com seu bot!")
+        print("   Acesse: https://t.me/SEU_BOT_USERNAME e envie /start")
+    else:
+        print("❌ Telegram não configurado no .env")
 
 if __name__ == "__main__":
     main()
