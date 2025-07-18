@@ -282,6 +282,7 @@ async def run_paper_trading(
     """Ponto de entrada para paper trading"""
     setup_logging()
     cfg = config or get_config(debug_mode=debug_mode)
+    cfg.debug_mode = True
 
     system = TradingSystem(cfg, paper_trading=True)
     # ajusta balance inicial
