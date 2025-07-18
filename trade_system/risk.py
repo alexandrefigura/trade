@@ -211,7 +211,10 @@ class MarketConditionValidator:
         # 2. Spread
         asks = market_data.get('orderbook_asks', [])
         bids = market_data.get('orderbook_bids', [])
-        if asks and bids and asks[0][0] > 0 and bids[0][0] > 0:
+        # Corrigido: checar tamanho antes de acessar elementos
+        if (asks is not None and bids is not None
+                and len(asks) > 0 and len(bids) > 0
+                and asks[0][0] > 0 and bids[0][0] > 0):
             sp = (asks[0][0] - bids[0][0]) / bids[0][0] * 10000
             self.spread_history.append(sp)
             if sp > self.config.max_spread_bps:
