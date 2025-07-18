@@ -21,16 +21,20 @@ class UltraFastRiskManager:
         self.max_daily_loss = config.max_daily_loss
         self.position_info = None
 
+        # Histórico de PnL em buffer circular
         self.pnl_history = np.zeros(1000, dtype=np.float32)
         self.pnl_index = 0
 
+        # Estatísticas de drawdown
         self.peak_balance = self.current_balance
         self.drawdown_start = None
         self.max_drawdown = 0.0
 
+        # Contador de trades diários
         self.daily_trades = 0
         self.last_reset_day = datetime.now().date()
 
+        # Limites de posições simultâneas
         self.max_positions = getattr(config, "max_positions", 1)
         self.current_positions = 0
 
@@ -53,6 +57,7 @@ class UltraFastRiskManager:
 
         base_pct = kelly * confidence * self.config.max_position_pct
 
+        # Ajuste por volatilidade
         if volatility < 0.01:
             vol_factor = 1.2
         elif volatility < 0.02:
@@ -107,6 +112,7 @@ class UltraFastRiskManager:
 
         tp = self.position_info.get('take_profit_pct', self.config.take_profit_pct)
         sl = self.position_info.get('stop_loss_pct', self.config.stop_loss_pct)
+
         if pnl_pct >= tp:
             return True, "Take Profit"
         if pnl_pct <= -sl:
@@ -186,14 +192,6 @@ class MarketConditionValidator:
 
         logger.info("🛡️ Market Validator inicializado")
 
-    # Compatibilidade com main.py
-    async def validate_market_conditions(
-        self,
-        market_data: Dict,
-        client=None
-    ) -> Tuple[bool, List[str]]:
-        return await self.validate(market_data, client)
-
     async def validate(
         self,
         market_data: Dict,
@@ -244,7 +242,7 @@ class MarketConditionValidator:
             self.reasons.append(reason_liq)
             self.score -= 15
 
-        # Horário de trading
+        # Horário
         ok_time, reason_time = self._check_trading_time()
         if not ok_time:
             self.reasons.append(reason_time)
@@ -261,22 +259,22 @@ class MarketConditionValidator:
 
     def _get_volatility(self, data: Dict) -> Optional[float]:
         prices = data.get('prices')
-        if prices is not None and len(prices) >= 100:
+        if isinstance(prices, (list, tuple)) and len(prices) >= 100:
             arr = np.array(prices[-100:], dtype=np.float64)
             return float(np.std(arr) / np.mean(arr))
         return None
 
     def _get_spread(self, data: Dict) -> Optional[float]:
-        asks = data.get('orderbook_asks')
-        bids = data.get('orderbook_bids')
-        if asks and bids and asks[0][0] > 0 and bids[0][0] > 0:
+        asks = data.get('orderbook_asks') or []
+        bids = data.get('orderbook_bids') or []
+        if len(asks) > 0 and len(bids) > 0 and asks[0][0] > 0 and bids[0][0] > 0:
             sp = (asks[0][0] - bids[0][0]) / bids[0][0] * 10000
             return float(sp)
         return None
 
     def _check_liquidity(self, data: Dict) -> Tuple[bool, str]:
-        asks = data.get('orderbook_asks', [])
-        bids = data.get('orderbook_bids', [])
+        asks = data.get('orderbook_asks') or []
+        bids = data.get('orderbook_bids') or []
         if len(asks) < 5 or len(bids) < 5:
             return False, "Orderbook raso"
         bid_vol = sum(lvl[1] for lvl in bids[:5])
@@ -294,8 +292,8 @@ class MarketConditionValidator:
         return True, ""
 
     def _detect_flash_crash(self, data: Dict) -> bool:
-        prices = data.get('prices')
-        if prices is not None and len(prices) >= 50:
+        prices = data.get('prices') or []
+        if len(prices) >= 50:
             recent = np.mean(prices[-10:])
             older = np.mean(prices[-50:-40])
             if older > 0 and abs(recent - older) / older > 0.05:
@@ -308,6 +306,6 @@ class MarketConditionValidator:
             'is_safe': self.is_safe,
             'reasons': self.reasons,
             'avg_volatility': np.mean(self.vol_history[-10:]) if self.vol_history else 0.0,
-            'avg_spread':    np.mean(self.spread_history[-10:]) if self.spread_history else 0.0,
+            'avg_spread': np.mean(self.spread_history[-10:]) if self.spread_history else 0.0,
             'last_volume_24h': self.vol24h_history[-1] if self.vol24h_history else 0.0
         }
