@@ -18,6 +18,7 @@ from trade_system.analysis.technical import UltraFastTechnicalAnalysis
 from trade_system.analysis.orderbook import ParallelOrderbookAnalyzer
 from trade_system.analysis.ml import SimplifiedMLPredictor
 from trade_system.risk import UltraFastRiskManager
+from trade_system.validation import MarketConditionValidator
 from trade_system.signals import OptimizedSignalConsolidator
 from trade_system.checkpoint import CheckpointManager
 
