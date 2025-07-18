@@ -223,7 +223,7 @@ class MarketConditionValidator:
     ) -> Tuple[bool, List[str]]:
         """Executa todas as checagens e retorna (is_safe, reasons)"""
         now = time.time()
-        if self.config.debug_mode:
+        if getattr(self.config, "debug_mode", False):
             return True, []
 
         # 1. Volatilidade
@@ -282,6 +282,17 @@ class MarketConditionValidator:
         self.is_safe = (self.score >= getattr(self.config, "min_market_score", 50.0))
         return self.is_safe, self.reasons
 
+    # Alias adicionado para compatibilidade com main.py
+    async def validate_market_conditions(
+        self,
+        market_data: Dict,
+        client=None
+    ) -> Tuple[bool, List[str]]:
+        """
+        Deprecated: use `validate()`. Mantido para compatibilidade com main.py.
+        """
+        return await self.validate(market_data, client)
+
     def _get_volatility(self, data: Dict) -> Optional[float]:
         prices = data.get('prices')
         if prices and len(prices) >= 100:
@@ -302,8 +313,8 @@ class MarketConditionValidator:
         bids = data.get('orderbook_bids', [])
         if len(asks) < 5 or len(bids) < 5:
             return False, "Orderbook raso"
-        bid_vol = sum([lvl[1] for lvl in bids[:5]])
-        ask_vol = sum([lvl[1] for lvl in asks[:5]])
+        bid_vol = sum(lvl[1] for lvl in bids[:5])
+        ask_vol = sum(lvl[1] for lvl in asks[:5])
         if bid_vol < 10 or ask_vol < 10:
             return False, "Baixa liquidez"
         return True, ""
@@ -321,7 +332,7 @@ class MarketConditionValidator:
         if prices and len(prices) >= 50:
             recent = np.mean(prices[-10:])
             older = np.mean(prices[-50:-40])
-            if older > 0 and abs(recent - older)/older > 0.05:
+            if older > 0 and abs(recent - older) / older > 0.05:
                 return True
         return False
 
@@ -331,6 +342,6 @@ class MarketConditionValidator:
             'is_safe': self.is_safe,
             'reasons': self.reasons,
             'avg_volatility': np.mean(self.vol_history[-10:]) if self.vol_history else 0.0,
-            'avg_spread':    np.mean(self.spread_history[-10:]) if self.spread_history else 0.0,
+            'avg_spread': np.mean(self.spread_history[-10:]) if self.spread_history else 0.0,
             'last_volume_24h': self.vol24h_history[-1] if self.vol24h_history else 0.0
         }
