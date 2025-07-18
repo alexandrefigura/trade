@@ -1,87 +1,57 @@
-"""
-Configuração centralizada de logging
-"""
-import os
-import sys
-import io
+"""Configuração de logging centralizada"""
 import logging
+import sys
 from datetime import datetime
+from pathlib import Path
+import colorlog
 
-
-def setup_logging(
-    log_level: str = "INFO",
-    log_file: str = None,
-    log_dir: str = "logs"
-) -> None:
-    """
-    Configura o sistema de logging de forma centralizada
-    
-    Args:
-        log_level: Nível de logging (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: Nome do arquivo de log (padrão: ultra_v5.log)
-        log_dir: Diretório para logs
-    """
-    # Força saída e erro em UTF-8
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-    
-    # Criar diretório de logs se não existir
-    os.makedirs(log_dir, exist_ok=True)
+def setup_logging(level: str = "INFO", log_dir: str = "logs"):
+    """Configura sistema de logging com cores e arquivo"""
+    # Criar diretório de logs
+    Path(log_dir).mkdir(exist_ok=True)
     
     # Nome do arquivo de log
-    if log_file is None:
-        log_file = f"trading_{datetime.now().strftime('%Y%m%d')}.log"
+    log_file = Path(log_dir) / f"trading_{datetime.now().strftime('%Y%m%d')}.log"
     
-    log_path = os.path.join(log_dir, log_file)
-    
-    # Handlers
-    handlers = []
-    
-    # File handler com UTF-8
-    file_handler = logging.FileHandler(log_path, encoding='utf-8')
-    file_handler.setLevel(getattr(logging, log_level.upper()))
-    handlers.append(file_handler)
-    
-    # Console handler
-    console_handler = logging.StreamHandler(stream=sys.stdout)
-    console_handler.setLevel(getattr(logging, log_level.upper()))
-    handlers.append(console_handler)
-    
-    # Formato detalhado
-    formatter = logging.Formatter(
+    # Formato para arquivo
+    file_formatter = logging.Formatter(
         '%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s',
         datefmt='%H:%M:%S'
     )
     
-    for handler in handlers:
-        handler.setFormatter(formatter)
-    
-    # Configurar root logger
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        handlers=handlers
+    # Formato colorido para console
+    console_formatter = colorlog.ColoredFormatter(
+        '%(asctime)s.%(msecs)03d %(log_color)s[%(levelname)s]%(reset)s %(blue)s%(name)s%(reset)s: %(message)s',
+        datefmt='%H:%M:%S',
+        log_colors={
+            'DEBUG': 'cyan',
+            'INFO': 'green',
+            'WARNING': 'yellow',
+            'ERROR': 'red',
+            'CRITICAL': 'red,bg_white',
+        }
     )
     
-    # Configurar loggers específicos
-    # Reduzir ruído de bibliotecas externas
+    # Handler para arquivo
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setFormatter(file_formatter)
+    
+    # Handler para console
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(console_formatter)
+    
+    # Configurar logger raiz
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, level.upper()))
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+    
+    # Suprimir logs excessivos de bibliotecas
     logging.getLogger('urllib3').setLevel(logging.WARNING)
-    logging.getLogger('websocket').setLevel(logging.WARNING)
-    logging.getLogger('binance').setLevel(logging.WARNING)
+    logging.getLogger('websockets').setLevel(logging.WARNING)
     
-    # Log inicial
     logger = logging.getLogger(__name__)
-    logger.info(f"Sistema de logging configurado - Nível: {log_level}")
-    logger.info(f"Logs salvos em: {log_path}")
-
-
-def get_logger(name: str) -> logging.Logger:
-    """
-    Retorna um logger configurado para o módulo
+    logger.info(f"Sistema de logging configurado - Nível: {level}")
+    logger.info(f"Logs salvos em: {log_file}")
     
-    Args:
-        name: Nome do módulo (geralmente __name__)
-        
-    Returns:
-        Logger configurado
-    """
-    return logging.getLogger(name)
+    return logger
