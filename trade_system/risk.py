@@ -36,12 +36,7 @@ class UltraFastRiskManager:
 
         logger.info(f"💰 Risk Manager inicializado - Balance: ${self.current_balance:,.2f}")
 
-    def calculate_position_size(
-        self,
-        confidence: float,
-        volatility: float,
-        current_price: Optional[float] = None
-    ) -> float:
+    def calculate_position_size(self, confidence: float, volatility: float, current_price: Optional[float] = None) -> float:
         self._check_daily_reset()
         if not self._check_risk_limits():
             return 0.0
@@ -53,6 +48,7 @@ class UltraFastRiskManager:
 
         base_pct = kelly * confidence * self.config.max_position_pct
 
+        vol_factor = 1.0
         if volatility < 0.01:
             vol_factor = 1.2
         elif volatility < 0.02:
@@ -70,15 +66,13 @@ class UltraFastRiskManager:
 
         if current_price and value > 0:
             qty = value / current_price
-            logger.debug(
-                f"📊 Position sizing: ${value:.2f} ({base_pct*100:.2f}%) = {qty:.6f} units @ ${current_price:.2f}"
-            )
+            logger.info(f"[DEBUG] Pos size: ${value:.2f} | conf: {confidence:.2f} | vol: {volatility:.4f} | qty: {qty:.6f}")
 
         return value
 
     def _check_risk_limits(self) -> bool:
         if self.daily_pnl < -self.max_daily_loss * self.initial_balance:
-            logger.warning(f"🛑 Stop daily loss atingido: ${self.daily_pnl:.2f}")
+            logger.warning(f"🔚 Stop daily loss atingido: ${self.daily_pnl:.2f}")
             return False
         if self.current_positions >= self.max_positions:
             logger.debug("Máximo de posições simultâneas atingido")
@@ -88,17 +82,11 @@ class UltraFastRiskManager:
             return False
         return True
 
-    def should_close_position(
-        self,
-        current_price: float,
-        entry_price: float,
-        side: str = 'BUY'
-    ) -> Tuple[bool, str]:
+    def should_close_position(self, current_price: float, entry_price: float, side: str = 'BUY') -> Tuple[bool, str]:
         if self.position_info is None:
             return False, ""
 
-        pnl_pct = ((current_price - entry_price) / entry_price) if side == 'BUY' \
-            else ((entry_price - current_price) / entry_price)
+        pnl_pct = ((current_price - entry_price) / entry_price) if side == 'BUY' else ((entry_price - current_price) / entry_price)
         highest = self.position_info.get('highest_pnl', 0.0)
         if pnl_pct > highest:
             self.position_info['highest_pnl'] = pnl_pct
@@ -164,115 +152,4 @@ class UltraFastRiskManager:
             'current_drawdown': curr_dd,
             'daily_trades': self.daily_trades,
             'can_trade': self._check_risk_limits()
-        }
-
-
-class MarketConditionValidator:
-    """Valida se as condições de mercado são seguras"""
-
-    def __init__(self, config):
-        self.config = config
-        self.last_check = 0.0
-        self.check_interval = getattr(config, "market_check_interval_s", 60)
-        self.is_safe = True
-        self.reasons: List[str] = []
-        self.score = 100.0
-
-        self.vol_history: List[float] = []
-        self.spread_history: List[float] = []
-        self.vol24h_history: List[float] = []
-
-        logger.info("🛡️ Market Validator inicializado")
-
-    async def validate(
-        self,
-        market_data: Dict,
-        client=None
-    ) -> Tuple[bool, List[str]]:
-        now = time.time()
-        if getattr(self.config, "debug_mode", False):
-            return True, []
-
-        prices = market_data.get('prices')
-        if prices is not None and len(prices) >= 100:
-            arr = np.asarray(prices[-100:], dtype=np.float64)
-            vol = float(np.std(arr) / np.mean(arr))
-            self.vol_history.append(vol)
-            if vol > self.config.max_volatility:
-                self.reasons.append(f"Volatilidade muito alta: {vol*100:.2f}%")
-                self.score -= 30
-            elif vol > 0.8 * self.config.max_volatility:
-                self.reasons.append(f"Volatilidade elevada: {vol*100:.2f}%")
-                self.score -= 15
-
-        asks = market_data.get('orderbook_asks', [])
-        bids = market_data.get('orderbook_bids', [])
-        if (asks is not None and bids is not None
-                and len(asks) > 0 and len(bids) > 0
-                and asks[0][0] > 0 and bids[0][0] > 0):
-            sp = (asks[0][0] - bids[0][0]) / bids[0][0] * 10000
-            self.spread_history.append(sp)
-            if sp > self.config.max_spread_bps:
-                self.reasons.append(f"Spread muito alto: {sp:.1f} bps")
-                self.score -= 25
-            elif sp > 0.8 * self.config.max_spread_bps:
-                self.reasons.append(f"Spread elevado: {sp:.1f} bps")
-                self.score -= 10
-
-        if client and now - self.last_check > self.check_interval:
-            try:
-                ticker = await client.get_ticker(symbol=self.config.symbol)
-                vol24 = float(ticker.get('quoteVolume', 0.0))
-                self.vol24h_history.append(vol24)
-                if vol24 < self.config.min_volume_24h:
-                    self.reasons.append(f"Volume 24h baixo: ${vol24:,.0f}")
-                    self.score -= 20
-            except Exception:
-                pass
-            self.last_check = now
-
-        if len(asks) < 5 or len(bids) < 5:
-            self.reasons.append("Orderbook raso")
-            self.score -= 15
-        else:
-            bid_vol = sum(lvl[1] for lvl in bids[:5])
-            ask_vol = sum(lvl[1] for lvl in asks[:5])
-            if bid_vol < 10 or ask_vol < 10:
-                self.reasons.append("Baixa liquidez")
-                self.score -= 15
-
-        hour = datetime.utcnow().hour
-        if 2 <= hour <= 6:
-            self.reasons.append("Baixa liquidez (2-6 UTC)")
-            self.score -= 10
-        if datetime.utcnow().weekday() == 6:
-            self.reasons.append("Domingo - liquidez reduzida")
-            self.score -= 10
-
-        if prices is not None and len(prices) >= 50:
-            recent = np.mean(prices[-10:])
-            older = np.mean(prices[-50:-40])
-            if older > 0 and abs(recent - older)/older > 0.05:
-                self.reasons.append("⚠️ FLASH CRASH DETECTADO")
-                self.score = 0
-
-        self.score = max(0.0, self.score)
-        self.is_safe = (self.score >= getattr(self.config, "min_market_score", 50.0))
-        return self.is_safe, self.reasons
-
-    async def validate_market_conditions(
-        self,
-        market_data: Dict,
-        client=None
-    ) -> Tuple[bool, List[str]]:
-        return await self.validate(market_data, client)
-
-    def get_market_health(self) -> Dict:
-        return {
-            'score': self.score,
-            'is_safe': self.is_safe,
-            'reasons': self.reasons,
-            'avg_volatility': np.mean(self.vol_history[-10:]) if self.vol_history else 0.0,
-            'avg_spread':    np.mean(self.spread_history[-10:]) if self.spread_history else 0.0,
-            'last_volume_24h': self.vol24h_history[-1] if self.vol24h_history else 0.0
         }
