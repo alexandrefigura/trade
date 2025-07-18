@@ -1,155 +1,132 @@
-"""
-Gestão de risco ultra-rápida e validação de condições de mercado
-"""
-import time
-import numpy as np
-from datetime import datetime
-from typing import Dict, Tuple, List, Optional
-from trade_system.logging_config import get_logger
+# Adicione estas modificações ao risk.py existente
 
-logger = get_logger(__name__)
+# No início do arquivo, adicione:
+from dataclasses import dataclass
+from typing import Optional, List
 
+@dataclass
+class Position:
+    """Representa uma posição aberta"""
+    side: str
+    entry_price: float
+    quantity: float
+    size: float
+    entry_time: float
+    stop_loss: float = None
+    take_profit: float = None
 
-class UltraFastRiskManager:
-    """Gestão de risco com cálculos otimizados"""
+# Na classe RiskManager existente, adicione estes novos atributos no __init__:
+def __init__(self, config):
+    # ... código existente ...
+    
+    # Novos atributos
+    self.positions: List[Position] = []
+    self.max_positions = config.get('max_positions', 1)
+    self.stop_loss_pct = config.get('stop_loss_pct', 2.0)
+    self.take_profit_pct = config.get('take_profit_pct', 3.0)
+    self.daily_pnl = 0.0
+    self.total_trades = 0
+    self.winning_trades = 0
+    self.losing_trades = 0
 
-    def __init__(self, config):
-        self.config = config
-        self.initial_balance = getattr(config, "initial_balance", 10000.0)
-        self.current_balance = self.initial_balance
-        self.daily_pnl = 0.0
-        self.max_daily_loss = config.max_daily_loss
-        self.position_info: Optional[Dict] = None
+# Adicione estes novos métodos à classe RiskManager:
 
-        self.pnl_history = np.zeros(1000, dtype=np.float32)
-        self.pnl_index = 0
+def has_open_position(self) -> bool:
+    """Verifica se há posição aberta"""
+    return len(self.positions) > 0
 
-        self.peak_balance = self.current_balance
-        self.drawdown_start: Optional[datetime] = None
-        self.max_drawdown = 0.0
+def get_open_position(self) -> Optional[Position]:
+    """Retorna a primeira posição aberta"""
+    return self.positions[0] if self.positions else None
 
-        self.daily_trades = 0
-        self.last_reset_day = datetime.now().date()
-
-        self.max_positions = getattr(config, "max_positions", 1)
-        self.current_positions = 0
-
-        logger.info(f"💰 Risk Manager inicializado - Balance: ${self.current_balance:,.2f}")
-
-    def calculate_position_size(self, confidence: float, volatility: float, current_price: Optional[float] = None) -> float:
-        self._check_daily_reset()
-        if not self._check_risk_limits():
-            return 0.0
-
-        win_rate = getattr(self.config, "assumed_win_rate", 0.55)
-        reward_risk = getattr(self.config, "assumed_rr_ratio", 1.5)
-        kelly = (win_rate * reward_risk - (1 - win_rate)) / reward_risk
-        kelly = max(0.0, min(kelly, getattr(self.config, "kelly_cap", 0.25)))
-
-        base_pct = kelly * confidence * self.config.max_position_pct
-
-        vol_factor = 1.0
-        if volatility < 0.01:
-            vol_factor = 1.2
-        elif volatility < 0.02:
-            vol_factor = 1.0
-        elif volatility < 0.03:
-            vol_factor = 0.5
-        else:
-            vol_factor = 0.3
-        base_pct *= vol_factor
-
-        value = self.current_balance * base_pct
-        min_usd = getattr(self.config, "min_trade_usd", 50.0)
-        max_pct_per_trade = getattr(self.config, "max_pct_per_trade", 0.10)
-        value = max(min_usd, min(value, self.current_balance * max_pct_per_trade))
-
-        if current_price and value > 0:
-            qty = value / current_price
-            logger.info(f"[DEBUG] Pos size: ${value:.2f} | conf: {confidence:.2f} | vol: {volatility:.4f} | qty: {qty:.6f}")
-
-        return value
-
-    def _check_risk_limits(self) -> bool:
-        if self.daily_pnl < -self.max_daily_loss * self.initial_balance:
-            logger.warning(f"🔚 Stop daily loss atingido: ${self.daily_pnl:.2f}")
+def can_open_position(self, side: str) -> bool:
+    """Verifica se pode abrir nova posição"""
+    # Verifica limite de posições
+    if len(self.positions) >= self.max_positions:
+        logger.warning(f"⚠️ Limite de posições atingido: {len(self.positions)}/{self.max_positions}")
+        return False
+    
+    # Verifica se já tem posição no mesmo lado
+    for pos in self.positions:
+        if pos.side == side:
+            logger.warning(f"⚠️ Já existe posição {side} aberta")
             return False
-        if self.current_positions >= self.max_positions:
-            logger.debug("Máximo de posições simultâneas atingido")
-            return False
-        if self.current_balance < getattr(self.config, "min_balance_usd", 100.0):
-            logger.warning(f"Saldo insuficiente: ${self.current_balance:.2f}")
-            return False
-        return True
+    
+    return True
 
-    def should_close_position(self, current_price: float, entry_price: float, side: str = 'BUY') -> Tuple[bool, str]:
-        if self.position_info is None:
-            return False, ""
+def open_position(self, side: str, price: float, quantity: float, size: float, current_time: float) -> Optional[Position]:
+    """Abre nova posição com stop loss e take profit"""
+    if not self.can_open_position(side):
+        return None
+    
+    # Calcula stop loss e take profit
+    if side == 'BUY':
+        stop_loss = price * (1 - self.stop_loss_pct / 100)
+        take_profit = price * (1 + self.take_profit_pct / 100)
+    else:  # SELL
+        stop_loss = price * (1 + self.stop_loss_pct / 100)
+        take_profit = price * (1 - self.take_profit_pct / 100)
+    
+    position = Position(
+        side=side,
+        entry_price=price,
+        quantity=quantity,
+        size=size,
+        entry_time=current_time,
+        stop_loss=stop_loss,
+        take_profit=take_profit
+    )
+    
+    self.positions.append(position)
+    logger.info(f"   Stop Loss: ${stop_loss:,.2f} | Take Profit: ${take_profit:,.2f}")
+    
+    return position
 
-        pnl_pct = ((current_price - entry_price) / entry_price) if side == 'BUY' else ((entry_price - current_price) / entry_price)
-        highest = self.position_info.get('highest_pnl', 0.0)
-        if pnl_pct > highest:
-            self.position_info['highest_pnl'] = pnl_pct
+def check_exit_conditions(self, position: Position, current_price: float) -> Optional[str]:
+    """Verifica condições de saída"""
+    if position.side == 'BUY':
+        if current_price <= position.stop_loss:
+            return 'STOP_LOSS'
+        elif current_price >= position.take_profit:
+            return 'TAKE_PROFIT'
+    else:  # SELL
+        if current_price >= position.stop_loss:
+            return 'STOP_LOSS'
+        elif current_price <= position.take_profit:
+            return 'TAKE_PROFIT'
+    
+    return None
 
-        tp = self.position_info.get('take_profit_pct', self.config.take_profit_pct)
-        sl = self.position_info.get('stop_loss_pct', self.config.stop_loss_pct)
-        if pnl_pct >= tp:
-            return True, "Take Profit"
-        if pnl_pct <= -sl:
-            return True, "Stop Loss"
-
-        if highest > getattr(self.config, "trailing_start_pct", 0.005):
-            trail_factor = getattr(self.config, "trailing_pct", 0.7)
-            if pnl_pct < highest * trail_factor:
-                return True, "Trailing Stop"
-
-        elapsed = time.time() - self.position_info.get('entry_time', time.time())
-        max_dur = self.position_info.get('max_duration', getattr(self.config, "max_position_duration", 3600))
-        if elapsed > max_dur and abs(pnl_pct) < getattr(self.config, "time_stop_pct", 0.002):
-            return True, "Time Stop"
-
-        return False, ""
-
-    def update_after_trade(self, pnl: float, fees: float = 0.0):
-        self.daily_pnl += pnl
-        self.current_balance += pnl - fees
-        self.pnl_history[self.pnl_index % 1000] = pnl
-        self.pnl_index += 1
-        self.daily_trades += 1
-
-        if self.current_balance > self.peak_balance:
-            self.peak_balance = self.current_balance
-            self.drawdown_start = None
-        else:
-            if self.drawdown_start is None:
-                self.drawdown_start = datetime.now()
-            dd = (self.peak_balance - self.current_balance) / self.peak_balance
-            self.max_drawdown = max(self.max_drawdown, dd)
-
-    def _check_daily_reset(self):
-        today = datetime.now().date()
-        if today > self.last_reset_day:
-            logger.info("📅 Reset diário de métricas")
-            self.daily_pnl = 0.0
-            self.daily_trades = 0
-            self.last_reset_day = today
-
-    def set_position(self, info: Dict):
-        self.position_info = info
-        self.current_positions = 1
-
-    def clear_position(self):
-        self.position_info = None
-        self.current_positions = 0
-
-    def get_risk_metrics(self) -> Dict:
-        curr_dd = ((self.peak_balance - self.current_balance) / self.peak_balance) if self.peak_balance > 0 else 0.0
-        return {
-            'current_balance': self.current_balance,
-            'daily_pnl': self.daily_pnl,
-            'total_return': (self.current_balance - self.initial_balance) / self.initial_balance,
-            'max_drawdown': self.max_drawdown,
-            'current_drawdown': curr_dd,
-            'daily_trades': self.daily_trades,
-            'can_trade': self._check_risk_limits()
-        }
+def close_position(self, position: Position, current_price: float, reason: str) -> dict:
+    """Fecha posição e calcula resultado"""
+    # Calcula P&L
+    if position.side == 'BUY':
+        pnl = (current_price - position.entry_price) * position.quantity
+    else:
+        pnl = (position.entry_price - current_price) * position.quantity
+    
+    pnl_pct = (pnl / position.size) * 100
+    
+    # Atualiza estatísticas
+    self.daily_pnl += pnl
+    self.total_trades += 1
+    
+    if pnl > 0:
+        self.winning_trades += 1
+        logger.info(f"✅ Posição fechada com LUCRO: ${pnl:.2f} ({pnl_pct:.2f}%)")
+    else:
+        self.losing_trades += 1
+        logger.info(f"❌ Posição fechada com PREJUÍZO: ${pnl:.2f} ({pnl_pct:.2f}%)")
+    
+    # Remove posição
+    self.positions.remove(position)
+    
+    # Atualiza balanço
+    self.balance += pnl
+    
+    return {
+        'pnl': pnl,
+        'pnl_pct': pnl_pct,
+        'reason': reason,
+        'new_balance': self.balance
+    }
