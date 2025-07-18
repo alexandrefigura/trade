@@ -10,7 +10,7 @@ from typing import Optional
 # Adicionar diretório pai ao path se necessário
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from trade_system.config import get_config, create_example_config
+from trade_system.config import get_config
 from trade_system.logging_config import setup_logging
 from trade_system.main import run_paper_trading
 
