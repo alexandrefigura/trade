@@ -47,7 +47,7 @@ class TradingSystem:
         self.signal_consolidator = OptimizedSignalConsolidator()
 
         # Gestão de risco e validação de mercado
-        self.risk_manager = UltraFastRiskManager(self.config)
+        self.risk_manager = RiskManager(self.config)
         self.market_validator = MarketConditionValidator(self.config)
 
         # Gerenciamento de checkpoint
