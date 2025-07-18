@@ -1,304 +1,312 @@
-# trade_system/analysis/technical.py
-
-"""
-Análise técnica ultra-rápida com NumPy e Numba
-"""
-
-import time
-from typing import Tuple, Optional, Dict
-
+"""Análise técnica otimizada com Numba"""
 import numpy as np
-from numba import njit
+import pandas as pd
+import talib
+from numba import jit, prange
+import logging
+from typing import Dict, Any, Tuple, Optional
 
-from trade_system.logging_config import get_logger
-
-logger = get_logger(__name__)
-
-
-# ===========================
-# FUNÇÕES NUMBA ULTRA-RÁPIDAS
-# ===========================
-
-@njit(cache=True, fastmath=True)
-def calculate_sma_fast(prices: np.ndarray, period: int) -> np.ndarray:
-    """Calcula SMA em O(n) usando janela deslizante."""
-    n = prices.shape[0]
-    sma = np.empty(n, dtype=np.float32)
-    sma[: period - 1] = np.nan
-    acc = 0.0
-    for i in range(period):
-        acc += prices[i]
-    sma[period - 1] = acc / period
-    for i in range(period, n):
-        acc += prices[i] - prices[i - period]
-        sma[i] = acc / period
-    return sma
-
-
-@njit(cache=True, fastmath=True)
-def calculate_ema_fast(prices: np.ndarray, period: int) -> np.ndarray:
-    """Calcula EMA com fator de suavização exponencial."""
-    alpha = 2.0 / (period + 1)
-    n = prices.shape[0]
-    ema = np.empty(n, dtype=np.float32)
-    ema[0] = prices[0]
-    for i in range(1, n):
-        ema[i] = alpha * prices[i] + (1 - alpha) * ema[i - 1]
-    return ema
-
-
-@njit(cache=True, fastmath=True)
+@jit(nopython=True)
 def calculate_rsi_fast(prices: np.ndarray, period: int = 14) -> np.ndarray:
-    """Calcula RSI clássico de Wilder."""
-    n = prices.shape[0]
-    rsi = np.empty(n, dtype=np.float32)
-    rsi[: period] = np.nan
-
-    gains = np.zeros(n - 1, dtype=np.float32)
-    losses = np.zeros(n - 1, dtype=np.float32)
-    for i in range(1, n):
-        diff = prices[i] - prices[i - 1]
-        gains[i - 1] = diff if diff > 0 else 0.0
-        losses[i - 1] = -diff if diff < 0 else 0.0
-
-    avg_gain = np.sum(gains[:period]) / period
-    avg_loss = np.sum(losses[:period]) / period
-    rs = avg_gain / avg_loss if avg_loss != 0.0 else np.inf
-    rsi[period] = 100.0 - (100.0 / (1.0 + rs))
-
-    for i in range(period + 1, n):
-        gain = gains[i - 1]
-        loss = losses[i - 1]
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-        rs = avg_gain / avg_loss if avg_loss != 0.0 else np.inf
-        rsi[i] = 100.0 - (100.0 / (1.0 + rs))
-
+    """RSI otimizado com Numba para performance máxima"""
+    if len(prices) < period + 1:
+        return np.full_like(prices, 50.0)
+    
+    deltas = np.diff(prices)
+    seed = deltas[:period+1]
+    up = seed[seed >= 0].sum() / period
+    down = -seed[seed < 0].sum() / period
+    
+    if down == 0:
+        rs = 100
+    else:
+        rs = up / down
+    
+    rsi = np.zeros_like(prices)
+    rsi[:period] = np.nan
+    rsi[period] = 100. - 100. / (1. + rs)
+    
+    for i in range(period + 1, len(prices)):
+        delta = deltas[i - 1]
+        if delta > 0:
+            upval = delta
+            downval = 0.
+        else:
+            upval = 0.
+            downval = -delta
+        
+        up = (up * (period - 1) + upval) / period
+        down = (down * (period - 1) + downval) / period
+        
+        if down == 0:
+            rs = 100
+        else:
+            rs = up / down
+            
+        rsi[i] = 100. - 100. / (1. + rs)
+    
     return rsi
 
+@jit(nopython=True)
+def calculate_bollinger_bands_fast(prices: np.ndarray, period: int = 20, 
+                                  std_dev: float = 2.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Bollinger Bands otimizado com Numba"""
+    middle = np.zeros_like(prices)
+    upper = np.zeros_like(prices)
+    lower = np.zeros_like(prices)
+    
+    for i in range(period - 1, len(prices)):
+        slice_prices = prices[i - period + 1:i + 1]
+        mean = np.mean(slice_prices)
+        std = np.std(slice_prices)
+        
+        middle[i] = mean
+        upper[i] = mean + (std_dev * std)
+        lower[i] = mean - (std_dev * std)
+    
+    return upper, middle, lower
 
-@njit(cache=True, fastmath=True)
-def calculate_bollinger_bands_fast(
-    prices: np.ndarray, period: int = 20, std_dev: float = 2.0
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Calcula bandas de Bollinger (upper, middle=SMA, lower)."""
-    sma = calculate_sma_fast(prices, period)
-    n = prices.shape[0]
-    std = np.empty(n, dtype=np.float32)
-    std[: period - 1] = np.nan
+@jit(nopython=True)
+def calculate_support_resistance_fast(highs: np.ndarray, lows: np.ndarray, 
+                                    lookback: int = 20) -> Tuple[float, float]:
+    """Calcula suporte e resistência de forma otimizada"""
+    if len(highs) < lookback:
+        return lows[-1], highs[-1]
+    
+    recent_lows = lows[-lookback:]
+    recent_highs = highs[-lookback:]
+    
+    # Método simples mas eficaz
+    support = np.percentile(recent_lows, 25)
+    resistance = np.percentile(recent_highs, 75)
+    
+    return support, resistance
 
-    for i in range(period - 1, n):
-        acc = 0.0
-        acc2 = 0.0
-        for j in range(i - period + 1, i + 1):
-            v = prices[j]
-            acc += v
-            acc2 += v * v
-        mean = acc / period
-        var = (acc2 / period) - (mean * mean)
-        std[i] = np.sqrt(var) if var > 0.0 else 0.0
-
-    upper = sma + std_dev * std
-    lower = sma - std_dev * std
-    return upper, sma, lower
-
-
-@njit(cache=True, fastmath=True)
-def detect_patterns_fast(prices: np.ndarray, volumes: np.ndarray) -> int:
-    """
-    Detecta padrões simples de rompimento:
-      +1 para rompimento de topo com volume,
-      -1 para rompimento de fundo com volume,
-       0 caso contrário.
-    """
-    n = prices.shape[0]
-    if n < 200:
-        return 0
-
-    momentum = (prices[-1] - prices[-10]) / prices[-10]
-    avg_vol = np.mean(volumes[-20:]) if volumes.size >= 20 else 0.0
-    spike = volumes[-1] > avg_vol * 1.5
-
-    high20 = np.max(prices[-20:])
-    low20 = np.min(prices[-20:])
-
-    if prices[-1] > high20 * 0.995 and spike and momentum > 0.001:
-        return 1
-    if prices[-1] < low20 * 1.005 and spike and momentum < -0.001:
-        return -1
-    return 0
-
-
-def filter_low_volume_and_volatility(
-    prices: np.ndarray,
-    volumes: np.ndarray,
-    min_volume_multiplier: float,
-    max_recent_volatility: float,
-) -> Optional[Tuple[str, float, Dict]]:
-    """
-    Filtra cenário de mercado inseguro:
-      - Volume atual muito baixo em relação à média
-      - Volatilidade recente acima do limite
-    Retorna sinal HOLD caso filtre, senão None.
-    """
-    if volumes.size >= 20:
-        avg_vol20 = float(np.mean(volumes[-20:]))
-        if volumes[-1] < avg_vol20 * min_volume_multiplier:
-            logger.debug(f"Volume baixo: {volumes[-1]:.2f} < {avg_vol20 * min_volume_multiplier:.2f}")
-            return 'HOLD', 0.5, {'reason': 'Filtrado por volume baixo'}
-
-    if prices.size >= 50:
-        recent_vol = float(np.std(prices[-50:]) / np.mean(prices[-50:]))
-        if recent_vol > max_recent_volatility:
-            logger.debug(f"Volatilidade alta: {recent_vol:.4f} > {max_recent_volatility:.4f}")
-            return 'HOLD', 0.5, {'reason': 'Filtrado por alta volatilidade'}
-
-    return None
-
-
-class UltraFastTechnicalAnalysis:
-    """Análise técnica com NumPy/Numba para máxima velocidade."""
-
-    def __init__(self, config):
-        self.config = config
-        self.last_calc = 0.0
-        self.interval = config.ta_interval_ms / 1000.0
-        self._cache: Tuple[str, float, Dict] = ('HOLD', 0.5, {'cached': True})
-        self.signals_count = {'BUY': 0, 'SELL': 0, 'HOLD': 0}
-
-    def analyze(
-        self, prices: np.ndarray, volumes: np.ndarray
-    ) -> Tuple[str, float, Dict]:
+class TechnicalAnalyzer:
+    """Análise técnica de alta performance"""
+    
+    def __init__(self, config: Any):
+        self.config = config.ta if hasattr(config, 'ta') else config.get('ta', {})
+        self.logger = logging.getLogger(__name__)
+        self.indicators_cache = {}
+        
+    def analyze(self, candles: pd.DataFrame) -> Dict[str, Any]:
         """
-        Executa todos os indicadores e combina sinais:
-          - SMA & EMA crosses
-          - RSI thresholds
-          - Bollinger Bands
-          - Padrões de volume/preço
-        Retorna (action, confidence, details).
+        Análise técnica completa
+        
+        Args:
+            candles: DataFrame com OHLCV
+            
+        Returns:
+            Dict com sinal, confiança e indicadores
         """
-        now = time.time()
-        # Checa se há dados suficientes ou sem variação
-        if (
-            prices.size < self.config.sma_long_period
-            or np.std(prices[-self.config.sma_long_period :]) == 0.0
-        ):
-            return 'HOLD', 0.5, {'reason': 'Dados insuficientes ou sem variação'}
-
-        # Reuso de resultado dentro do intervalo
-        if now - self.last_calc < self.interval:
-            return self._cache
-
-        # Filtro de segurança (volume/volatilidade) quando não está em debug
-        if not self.config.debug_mode:
-            filt = filter_low_volume_and_volatility(
-                prices,
-                volumes,
-                self.config.min_volume_multiplier,
-                self.config.max_recent_volatility,
-            )
-            if filt is not None:
-                return filt
-
-        start = time.perf_counter()
-
-        # Calcula indicadores fundamentais
-        sma_s = calculate_sma_fast(prices, self.config.sma_short_period)
-        sma_l = calculate_sma_fast(prices, self.config.sma_long_period)
-        ema_s = calculate_ema_fast(prices, self.config.ema_short_period)
-        ema_l = calculate_ema_fast(prices, self.config.ema_long_period)
-        rsi = calculate_rsi_fast(prices, self.config.rsi_period)
-        bb_u, bb_m, bb_l = calculate_bollinger_bands_fast(
-            prices, self.config.bb_period, self.config.bb_std_dev
-        )
-        pat = detect_patterns_fast(prices, volumes)
-
-        signals, confs, reasons = [], [], []
-
+        try:
+            if len(candles) < 50:
+                return self._empty_analysis()
+            
+            # Extrair arrays numpy para performance
+            close = candles['close'].values
+            high = candles['high'].values
+            low = candles['low'].values
+            volume = candles['volume'].values
+            
+            # Calcular todos os indicadores
+            indicators = self._calculate_indicators(close, high, low, volume)
+            
+            # Gerar sinal baseado nos indicadores
+            signal, confidence = self._generate_signal(indicators, close[-1])
+            
+            self.logger.info(f"📊 TA Sinal: {signal} (conf {confidence:.2%})")
+            
+            return {
+                'signal': signal,
+                'confidence': confidence,
+                'indicators': indicators,
+                'price': close[-1]
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Erro na análise técnica: {e}")
+            return self._empty_analysis()
+    
+    def _calculate_indicators(self, close: np.ndarray, high: np.ndarray, 
+                            low: np.ndarray, volume: np.ndarray) -> Dict[str, float]:
+        """Calcula todos os indicadores técnicos"""
+        indicators = {}
+        
         # RSI
-        last_rsi = float(rsi[-1])
-        if last_rsi < self.config.rsi_buy_threshold:
-            signals.append(1)
-            confs.append(self.config.rsi_confidence)
-            reasons.append(f"RSI {last_rsi:.1f}<buy")
-        elif last_rsi > self.config.rsi_sell_threshold:
-            signals.append(-1)
-            confs.append(self.config.rsi_confidence)
-            reasons.append(f"RSI {last_rsi:.1f}>sell")
-
-        # EMA cross
-        if ema_s[-2] <= ema_l[-2] < ema_s[-1] > ema_l[-1]:
-            signals.append(1)
-            confs.append(self.config.sma_cross_confidence)
-            reasons.append("EMA cross up")
-        elif ema_s[-2] >= ema_l[-2] > ema_s[-1] < ema_l[-1]:
-            signals.append(-1)
-            confs.append(self.config.sma_cross_confidence)
-            reasons.append("EMA cross down")
-
+        rsi_period = self.config.get('rsi_period', 14)
+        indicators['rsi'] = calculate_rsi_fast(close, rsi_period)[-1]
+        
+        # MACD
+        macd_fast = self.config.get('macd_fast', 12)
+        macd_slow = self.config.get('macd_slow', 26)
+        macd_signal = self.config.get('macd_signal', 9)
+        
+        macd_line, signal_line, macd_hist = talib.MACD(
+            close, fastperiod=macd_fast, slowperiod=macd_slow, signalperiod=macd_signal
+        )
+        indicators['macd'] = macd_line[-1] if not np.isnan(macd_line[-1]) else 0
+        indicators['macd_signal'] = signal_line[-1] if not np.isnan(signal_line[-1]) else 0
+        indicators['macd_hist'] = macd_hist[-1] if not np.isnan(macd_hist[-1]) else 0
+        
         # Bollinger Bands
-        price = float(prices[-1])
-        if price < bb_l[-1] * 0.998:
-            signals.append(1)
-            confs.append(self.config.bb_confidence)
-            reasons.append("BB lower")
-        elif price > bb_u[-1] * 1.002:
-            signals.append(-1)
-            confs.append(self.config.bb_confidence)
-            reasons.append("BB upper")
-
-        # Padrões detectados
-        if pat != 0:
-            signals.append(pat)
-            confs.append(self.config.pattern_confidence)
-            reasons.append("Pattern bullish" if pat > 0 else "Pattern bearish")
-
-        # Combina sinais
-        if not signals:
-            action, overall_conf = 'HOLD', 0.5
+        bb_period = self.config.get('bb_period', 20)
+        bb_std = self.config.get('bb_std', 2.0)
+        bb_upper, bb_middle, bb_lower = calculate_bollinger_bands_fast(close, bb_period, bb_std)
+        
+        indicators['bb_upper'] = bb_upper[-1]
+        indicators['bb_middle'] = bb_middle[-1]
+        indicators['bb_lower'] = bb_lower[-1]
+        indicators['bb_width'] = (bb_upper[-1] - bb_lower[-1]) / bb_middle[-1]
+        
+        # EMAs
+        ema_short = self.config.get('ema_short', 9)
+        ema_long = self.config.get('ema_long', 21)
+        indicators['ema_short'] = talib.EMA(close, timeperiod=ema_short)[-1]
+        indicators['ema_long'] = talib.EMA(close, timeperiod=ema_long)[-1]
+        indicators['ema_diff'] = (indicators['ema_short'] - indicators['ema_long']) / indicators['ema_long']
+        
+        # Momentum (feature importante que estava faltando!)
+        momentum_period = self.config.get('momentum_period', 10)
+        indicators['momentum'] = talib.MOM(close, timeperiod=momentum_period)[-1]
+        
+        # ATR (Volatilidade)
+        atr_period = self.config.get('atr_period', 14)
+        indicators['atr'] = talib.ATR(high, low, close, timeperiod=atr_period)[-1]
+        indicators['volatility'] = indicators['atr'] / close[-1]
+        
+        # Support & Resistance
+        support, resistance = calculate_support_resistance_fast(high, low)
+        indicators['support'] = support
+        indicators['resistance'] = resistance
+        
+        # Volume indicators
+        indicators['volume_ratio'] = volume[-1] / np.mean(volume[-20:])
+        indicators['volume_sma'] = np.mean(volume[-20:])
+        
+        # Price action
+        indicators['price_change'] = (close[-1] - close[-2]) / close[-2]
+        indicators['high_low_ratio'] = (high[-1] - low[-1]) / close[-1]
+        
+        # Trend strength
+        indicators['trend_strength'] = self._calculate_trend_strength(close)
+        
+        # Volume profile
+        indicators['volume_profile'] = self._calculate_volume_profile(volume, close)
+        
+        return indicators
+    
+    def _calculate_trend_strength(self, prices: np.ndarray) -> float:
+        """Calcula força da tendência usando regressão linear"""
+        if len(prices) < 20:
+            return 0.5
+        
+        # Usar últimos 20 períodos
+        y = prices[-20:]
+        x = np.arange(len(y))
+        
+        # Regressão linear simples
+        slope = np.polyfit(x, y, 1)[0]
+        
+        # Normalizar pela volatilidade
+        normalized_slope = np.tanh(slope / np.std(y) * 10)
+        
+        # Converter para 0-1
+        return (normalized_slope + 1) / 2
+    
+    def _calculate_volume_profile(self, volume: np.ndarray, prices: np.ndarray) -> float:
+        """Calcula perfil de volume (VWAP simplificado)"""
+        if len(volume) < 20:
+            return 0.5
+        
+        # VWAP dos últimos 20 períodos
+        vwap = np.sum(volume[-20:] * prices[-20:]) / np.sum(volume[-20:])
+        current_price = prices[-1]
+        
+        # Diferença normalizada
+        diff = (current_price - vwap) / vwap
+        
+        # Converter para score 0-1
+        return np.tanh(diff * 100) / 2 + 0.5
+    
+    def _generate_signal(self, indicators: Dict[str, float], current_price: float) -> Tuple[str, float]:
+        """Gera sinal de trading baseado nos indicadores"""
+        buy_score = 0
+        sell_score = 0
+        total_weight = 0
+        
+        # RSI
+        rsi = indicators['rsi']
+        rsi_buy = self.config.get('rsi_buy_threshold', 30)
+        rsi_sell = self.config.get('rsi_sell_threshold', 70)
+        
+        if rsi < rsi_buy:
+            buy_score += 0.25
+        elif rsi > rsi_sell:
+            sell_score += 0.25
+        total_weight += 0.25
+        
+        # MACD
+        if indicators['macd'] > indicators['macd_signal'] and indicators['macd'] < 0:
+            buy_score += 0.20
+        elif indicators['macd'] < indicators['macd_signal'] and indicators['macd'] > 0:
+            sell_score += 0.20
+        total_weight += 0.20
+        
+        # Bollinger Bands
+        if current_price < indicators['bb_lower']:
+            buy_score += 0.15
+        elif current_price > indicators['bb_upper']:
+            sell_score += 0.15
+        total_weight += 0.15
+        
+        # EMA Cross
+        if indicators['ema_diff'] > 0.001:
+            buy_score += 0.15
+        elif indicators['ema_diff'] < -0.001:
+            sell_score += 0.15
+        total_weight += 0.15
+        
+        # Momentum
+        if indicators['momentum'] > 0:
+            buy_score += 0.10
         else:
-            arr = np.array(signals, dtype=np.float32)
-            wts = np.array(confs, dtype=np.float32)
-            score = float(np.average(arr, weights=wts)) if wts.sum() > 0 else 0.0
-            overall_conf = float(wts.mean())
-            if score > self.config.buy_threshold:
-                action = 'BUY'
-            elif score < -self.config.sell_threshold:
-                action = 'SELL'
-            else:
-                action = 'HOLD'
-
-        # Log e estatísticas
-        if action != 'HOLD':
-            logger.info(f"📊 TA Sinal: {action} (conf {overall_conf:.2%})")
-        self.signals_count[action] += 1
-
-        # Monta detalhes para inspeção
-        details = {
-            'rsi': last_rsi,
-            'sma_short': float(sma_s[-1]),
-            'sma_long': float(sma_l[-1]),
-            'ema_short': float(ema_s[-1]),
-            'ema_long': float(ema_l[-1]),
-            'bb_upper': float(bb_u[-1]),
-            'bb_middle': float(bb_m[-1]),
-            'bb_lower': float(bb_l[-1]),
-            'pattern': int(pat),
-            'reasons': reasons,
-            'calc_ms': (time.perf_counter() - start) * 1000.0,
-        }
-
-        # Atualiza cache e timestamp
-        self.last_calc = now
-        self._cache = (action, overall_conf, details)
-        return action, overall_conf, details
-
-    def get_signal_stats(self) -> Dict[str, int]:
-        """Retorna contagem de sinais gerados."""
-        total = sum(self.signals_count.values())
+            sell_score += 0.10
+        total_weight += 0.10
+        
+        # Trend
+        trend = indicators['trend_strength']
+        if trend > 0.6:
+            buy_score += 0.10
+        elif trend < 0.4:
+            sell_score += 0.10
+        total_weight += 0.10
+        
+        # Volume
+        if indicators['volume_ratio'] > 1.5 and indicators['price_change'] > 0:
+            buy_score += 0.05
+        elif indicators['volume_ratio'] > 1.5 and indicators['price_change'] < 0:
+            sell_score += 0.05
+        total_weight += 0.05
+        
+        # Calcular confiança final
+        buy_confidence = buy_score / total_weight if total_weight > 0 else 0
+        sell_confidence = sell_score / total_weight if total_weight > 0 else 0
+        
+        # Determinar sinal
+        if buy_confidence > sell_confidence and buy_confidence > 0.5:
+            return 'BUY', buy_confidence
+        elif sell_confidence > buy_confidence and sell_confidence > 0.5:
+            return 'SELL', sell_confidence
+        else:
+            return 'HOLD', max(buy_confidence, sell_confidence)
+    
+    def _empty_analysis(self) -> Dict[str, Any]:
+        """Retorna análise vazia em caso de erro"""
         return {
-            'total': total,
-            'buy': self.signals_count['BUY'],
-            'sell': self.signals_count['SELL'],
-            'hold': self.signals_count['HOLD'],
+            'signal': 'HOLD',
+            'confidence': 0.0,
+            'indicators': {},
+            'price': 0.0
         }
