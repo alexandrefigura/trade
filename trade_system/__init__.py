@@ -15,7 +15,7 @@ __author__ = "Trading System Team"
 __license__ = "MIT"
 
 # Importações principais para facilitar uso
-from trade_system.config import UltraConfigV5, get_config, create_example_config
+from trade_system.config import TradingConfig, get_config
 from trade_system.logging_config import setup_logging, get_logger
 from trade_system.cache import UltraFastCache
 from trade_system.rate_limiter import RateLimiter, rate_limited
