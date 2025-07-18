@@ -4,7 +4,7 @@ Sistema de backtesting integrado para validação de estratégias
 import asyncio
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from trade_system.logging_config import get_logger
 from trade_system.analysis.technical import UltraFastTechnicalAnalysis
