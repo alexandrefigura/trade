@@ -2,6 +2,7 @@
 Módulo principal para orquestração do sistema de trading
 """
 import os
+import time
 import asyncio
 import signal
 from datetime import datetime
