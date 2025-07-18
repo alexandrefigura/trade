@@ -1,181 +1,213 @@
 """
-Interface de linha de comando para o sistema de trading
+Configuração centralizada do sistema de trading
 """
+
+from dotenv import load_dotenv
+load_dotenv()  # carrega variáveis de ambiente do .env
+
 import os
-import sys
-import asyncio
-import argparse
-from typing import Optional
+import yaml
+import logging
+import multiprocessing as mp
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
 
-# Adicionar diretório pai ao path se necessário
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from trade_system.config import get_config, create_example_config
-from trade_system.logging_config import setup_logging
-from trade_system.main import run_paper_trading
+logger = logging.getLogger(__name__)
 
 
-def create_parser() -> argparse.ArgumentParser:
-    """Cria parser de argumentos"""
-    parser = argparse.ArgumentParser(
-        description='Sistema de Trading Ultra-Otimizado v5.2',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Exemplos:
-  python -m trade_system.cli backtest              # Executa backtest
-  python -m trade_system.cli backtest --debug      # Backtest em modo debug
-  python -m trade_system.cli paper                 # Inicia paper trading
-  python -m trade_system.cli paper --no-backtest   # Paper trading sem backtest
-  python -m trade_system.cli config                # Cria config.yaml exemplo
-        """
-    )
+@dataclass
+class UltraConfigV5:
+    """Configuração para máxima performance"""
+    # APIs
+    api_key: str = ""
+    api_secret: str = ""
+    
+    # Trading
+    symbol: str = "BTCUSDT"
+    min_confidence: float = 0.75
+    max_position_pct: float = 0.02
 
-    subparsers = parser.add_subparsers(dest='command', help='Comandos disponíveis')
+    # Parâmetros de Technical Analysis
+    ta_interval_ms: int = 5000
+    sma_short_period: int = 9
+    sma_long_period: int = 20
+    ema_short_period: int = 9
+    ema_long_period: int = 20
+    rsi_period: int = 14
+    rsi_buy_threshold: float = 30.0
+    rsi_sell_threshold: float = 70.0
+    rsi_confidence: float = 0.8
+    sma_cross_confidence: float = 0.75
+    bb_period: int = 20
+    bb_std_dev: float = 2.0
+    bb_confidence: float = 0.7
+    pattern_confidence: float = 0.85
+    buy_threshold: float = 0.3
+    sell_threshold: float = 0.3
 
-    # Backtest
-    backtest_parser = subparsers.add_parser(
-        'backtest', help='Executa backtest da estratégia'
-    )
-    backtest_parser.add_argument(
-        '--debug', action='store_true',
-        help='Modo debug com parâmetros agressivos'
-    )
-    backtest_parser.add_argument(
-        '--days', type=int, default=7,
-        help='Dias de dados históricos (padrão: 7)'
-    )
-    backtest_parser.add_argument(
-        '--symbol', type=str,
-        help='Par de trading (ex: BTCUSDT)'
-    )
+    # Filtros
+    min_volume_multiplier: float = 1.0
+    max_recent_volatility: float = 0.05
 
-    # Paper Trading
-    paper_parser = subparsers.add_parser(
-        'paper', help='Inicia paper trading com dados reais'
-    )
-    paper_parser.add_argument(
-        '--debug', action='store_true', help='Modo debug'
-    )
-    paper_parser.add_argument(
-        '--no-backtest', action='store_true',
-        help='Pular validação de backtest inicial'
-    )
-    paper_parser.add_argument(
-        '--balance', type=float, default=10000,
-        help='Balance inicial (padrão: 10000)'
-    )
+    # ATR parameters
+    atr_period: int = 14
+    tp_multiplier: float = 1.5
+    sl_multiplier: float = 1.0
 
-    # Config
-    config_parser = subparsers.add_parser(
-        'config', help='Gerenciar configurações'
-    )
-    config_parser.add_argument(
-        '--create', action='store_true', help='Criar config.yaml exemplo'
-    )
-    config_parser.add_argument(
-        '--show', action='store_true', help='Mostrar configuração atual'
-    )
+    # Performance
+    use_redis: bool = True
+    redis_host: str = "localhost"
+    redis_port: int = 6379
 
-    # Opções globais
-    parser.add_argument(
-        '--log-level',
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-        default='INFO', help='Nível de logging'
-    )
-    parser.add_argument(
-        '--config-file', type=str, default='config.yaml',
-        help='Arquivo de configuração'
-    )
+    # Processamento paralelo
+    num_workers: int = mp.cpu_count()
+    batch_size: int = 1000
 
-    return parser
+    # Buffers otimizados
+    price_buffer_size: int = 10000
+    orderbook_buffer_size: int = 100
 
+    # Timing
+    main_loop_interval_ms: int = 1000
+    gc_interval_cycles: int = 1000
 
-async def run_backtest_command(args):
-    """Executa comando de backtest"""
-    from trade_system.backtester import run_backtest_validation
+    # Configuração avançada
+    rate_limit_window: int = 60
+    rate_limit_max_calls: int = 1200
 
-    print("""
-╔══════════════════════════════════════════════════════════════╗
-║                    MODO BACKTEST                             ║
-╚══════════════════════════════════════════════════════════════╝
-""")
-    results = await run_backtest_validation(
-        config=get_config(debug_mode=args.debug),
-        days=args.days,
-        debug_mode=args.debug
-    )
-    if results:
-        print(f"✅ Backtest finalizado: {results['num_trades']} trades, ROI {results.get('total_return', 0):.2%}")
+    # Proteções de mercado
+    max_volatility: float = 0.05
+    max_spread_bps: float = 20.0
+    min_volume_24h: int = 1_000_000
+
+    # Alertas
+    enable_alerts: bool = True
+    telegram_token: str = ""
+    telegram_chat_id: str = ""
+    alert_email: str = ""
+
+    # Risk management
+    max_daily_loss: float = 0.02
+
+    # Debug mode
+    debug_mode: bool = False
 
 
-async def run_paper_trading_command(args):
-    """Executa comando de paper trading"""
-    print("""
-╔══════════════════════════════════════════════════════════════╗
-║                  PAPER TRADING MODE                          ║
-║              Execução simulada com dados reais               ║
-╚══════════════════════════════════════════════════════════════╝
-""")
-
-    config = get_config(debug_mode=args.debug)
-    # Executa validação de backtest, se não for pulado
-    if not args.no_backtest:
-        from trade_system.backtester import run_backtest_validation
-        await run_backtest_validation(
-            config=config,
-            days=7,
-            debug_mode=args.debug
-        )
-
-    # Inicia paper trading completo
-    await run_paper_trading(
-        config=config,
-        initial_balance=args.balance,
-        debug_mode=args.debug
-    )
+def load_config_from_yaml(config_path: str = 'config.yaml') -> Dict[str, Any]:
+    """Carrega configurações do arquivo YAML"""
+    try:
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        logger.warning(f"{config_path} não encontrado, usando configurações padrão")
+        return {}
+    except Exception as e:
+        logger.error(f"Erro ao carregar {config_path}: {e}")
+        return {}
 
 
-def run_config_command(args):
-    """Executa comando de configuração"""
-    cfg_file = args.config_file
-    if args.create:
-        if os.path.exists(cfg_file):
-            confirm = input(f"{cfg_file} já existe. Sobrescrever? (s/n): ")
-            if confirm.lower() != 's':
-                print("Operação cancelada.")
-                return
-        create_example_config(cfg_file)
-        print(f"✅ {cfg_file} criado com sucesso!")
-        print("\n📝 Edite o arquivo para personalizar os parâmetros")
-    elif args.show:
-        config = get_config(debug_mode=getattr(args, 'debug', False))
-        print("\n📋 Configuração atual:")
-        print(f"Symbol: {config.symbol}")
-        print(f"Min confidence: {config.min_confidence}")
-        print(f"Max position: {config.max_position_pct*100}%")
-        print(f"Debug mode: {config.debug_mode}")
-        print(f"\nPara ver todas as configurações, abra {cfg_file}")
+def create_debug_config() -> UltraConfigV5:
+    """Cria configuração ultra-agressiva para debug e testes"""
+    config = UltraConfigV5()
+    # Parâmetros agressivos
+    config.min_confidence = 0.40
+    config.rsi_buy_threshold = 45.0
+    config.rsi_sell_threshold = 55.0
+    config.rsi_confidence = 0.50
+    config.bb_confidence = 0.50
+    config.sma_cross_confidence = 0.50
+    config.pattern_confidence = 0.50
+    config.buy_threshold = 0.05
+    config.sell_threshold = 0.05
+    config.min_volume_multiplier = 0.1
+    config.max_recent_volatility = 0.50
+    config.max_volatility = 0.50
+    config.debug_mode = True
+    logger.warning("⚠️ MODO DEBUG - Parâmetros ultra-agressivos ativados!")
+    return config
 
 
-def main():
-    """Função principal do CLI"""
-    parser = create_parser()
-    args = parser.parse_args()
+def get_config(debug_mode: bool = False) -> UltraConfigV5:
+    """
+    Retorna configuração completa do sistema
+    Prioridade: ENV > YAML > Debug > Default
+    """
+    config = create_debug_config() if debug_mode else UltraConfigV5()
+    # YAML
+    yaml_cfg = load_config_from_yaml()
+    if yaml_cfg:
+        trading = yaml_cfg.get('trading', {})
+        config.symbol = trading.get('symbol', config.symbol)
+        config.min_confidence = trading.get('min_confidence', config.min_confidence)
+        config.max_position_pct = trading.get('max_position_pct', config.max_position_pct)
+        risk = yaml_cfg.get('risk', {})
+        config.max_volatility = risk.get('max_volatility', config.max_volatility)
+        config.max_spread_bps = risk.get('max_spread_bps', config.max_spread_bps)
+        config.max_daily_loss = risk.get('max_daily_loss', config.max_daily_loss)
+        config.atr_period = risk.get('atr_period', config.atr_period)
+        config.tp_multiplier = risk.get('tp_multiplier', config.tp_multiplier)
+        config.sl_multiplier = risk.get('sl_multiplier', config.sl_multiplier)
+        ta = yaml_cfg.get('ta', {})
+        for key, value in ta.items():
+            if hasattr(config, key): setattr(config, key, value)
+        filters = yaml_cfg.get('filters', {})
+        config.min_volume_multiplier = filters.get('min_volume_multiplier', config.min_volume_multiplier)
+        config.max_recent_volatility = filters.get('max_recent_volatility', config.max_recent_volatility)
+        performance = yaml_cfg.get('performance', {})
+        config.ta_interval_ms = performance.get('ta_interval_ms', config.ta_interval_ms)
+        config.main_loop_interval_ms = performance.get('main_loop_interval_ms', config.main_loop_interval_ms)
+        config.debug_mode = yaml_cfg.get('debug_mode', debug_mode)
+    # ENV
+    config.api_key = os.getenv('BINANCE_API_KEY', config.api_key)
+    config.api_secret = os.getenv('BINANCE_API_SECRET', config.api_secret)
+    config.telegram_token = os.getenv('TELEGRAM_BOT_TOKEN', config.telegram_token)
+    config.telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID', config.telegram_chat_id)
+    return config
 
-    # Configurar logging
-    setup_logging(log_level=args.log_level)
 
-    if not args.command:
-        parser.print_help()
-        sys.exit(0)
+def create_example_config(config_path: str = 'config.yaml'):
+    """Cria um arquivo config.yaml de exemplo"""
+    example = """# Configuração do Sistema de Trading v5.2
 
-    if args.command == 'backtest':
-        asyncio.run(run_backtest_command(args))
-    elif args.command == 'paper':
-        asyncio.run(run_paper_trading_command(args))
-    elif args.command == 'config':
-        run_config_command(args)
+debug_mode: false
 
+trading:
+  symbol: "BTCUSDT"
+  min_confidence: 0.75
+  max_position_pct: 0.02
 
-if __name__ == '__main__':
-    main()
+risk:
+  max_volatility: 0.05
+  max_spread_bps: 20
+  max_daily_loss: 0.02
+  atr_period: 14
+  tp_multiplier: 1.5
+  sl_multiplier: 1.0
+
+ta:
+  rsi_period: 14
+  rsi_buy_threshold: 30
+  rsi_sell_threshold: 70
+  rsi_confidence: 0.8
+  sma_short_period: 9
+  sma_long_period: 20
+  ema_short_period: 9
+  ema_long_period: 20
+  sma_cross_confidence: 0.75
+  bb_period: 20
+  bb_std_dev: 2.0
+  bb_confidence: 0.7
+  pattern_confidence: 0.85
+  buy_threshold: 0.3
+  sell_threshold: 0.3
+
+filters:
+  min_volume_multiplier: 1.0
+  max_recent_volatility: 0.05
+
+performance:
+  ta_interval_ms: 5000
+  main_loop_interval_ms: 1000
+"""
+    with open(config_path, 'w') as f: f.write(example)
+    logger.info(f"Arquivo {config_path} criado com sucesso!")
