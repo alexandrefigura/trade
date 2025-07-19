@@ -1,22 +1,7 @@
-"""
-Módulos de análise do sistema de trading
-"""
-from trade_system.analysis.technical import (
-    UltraFastTechnicalAnalysis,
-    calculate_sma_fast,
-    calculate_ema_fast,
-    calculate_rsi_fast,
-    calculate_bollinger_bands_fast,
-    detect_patterns_fast,
-    filter_low_volume_and_volatility
-)
+"""Módulos de análise do sistema de trading"""
 
-__all__ = [
-    'UltraFastTechnicalAnalysis',
-    'calculate_sma_fast',
-    'calculate_ema_fast',
-    'calculate_rsi_fast',
-    'calculate_bollinger_bands_fast',
-    'detect_patterns_fast',
-    'filter_low_volume_and_volatility'
-]
+from trade_system.analysis.technical import TechnicalAnalyzer
+from trade_system.analysis.ml import MLPredictor
+from trade_system.analysis.orderbook import OrderbookAnalyzer
+
+__all__ = ['TechnicalAnalyzer', 'MLPredictor', 'OrderbookAnalyzer']
