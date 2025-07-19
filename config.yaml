@@ -1,93 +1,92 @@
-# Configuração do Sistema de Trading v5.3 - Com Proteções Aprimoradas
-# Modo debug (parâmetros mais agressivos)
-debug_mode: true
+# Configuração do Ultra Trading System
 
-trading:
-  symbol: "BTCUSDT"
-  min_confidence: 0.40       # Reduzido para permitir mais operações
-  max_position_pct: 0.05     # Até 5% do saldo por trade
-  
-  # NOVAS CONFIGURAÇÕES DE PROTEÇÃO
-  allow_reversal_trades: true    # Permite fechar e abrir posição contrária
-  close_on_shutdown: false       # Não fecha posições ao desligar
-  signal_cooldown: 60           # 60 segundos entre trades
+# API Configuration
+api_key: ""  # Definir via BINANCE_API_KEY env var
+api_secret: ""  # Definir via BINANCE_API_SECRET env var
+testnet: false
 
+# Trading Configuration
+symbol: "BTCUSDT"
+base_balance: 10000.0
+min_confidence: 0.75
+max_position_pct: 0.02
+min_order_size: 10.0
+
+# Risk Management
 risk:
-  max_volatility: 0.50       # Tolerância maior à volatilidade
-  max_spread_bps: 50         # Aceita spreads maiores
-  max_daily_loss: 0.05       # Permite perder até 5% no dia
-  atr_period: 14
-  tp_multiplier: 1.5
-  sl_multiplier: 1.0
-  
-  # NOVAS CONFIGURAÇÕES DE RISCO
-  max_positions: 1           # Máximo de posições simultâneas
-  stop_loss_pct: 2.0         # Stop loss de 2%
-  take_profit_pct: 3.0       # Take profit de 3%
-  
-  # PROTEÇÕES ADICIONAIS (opcional)
-  min_risk_reward: 1.5       # Relação risco/recompensa mínima
-  max_drawdown: 0.10         # Drawdown máximo de 10%
-  
+  max_volatility: 0.05
+  max_spread_bps: 20
+  max_daily_loss: 0.02
+  stop_loss_pct: 0.015
+  take_profit_pct: 0.03
+  trailing_stop_pct: 0.01
+  max_positions: 1
+  position_timeout_hours: 24
+
+# Technical Analysis
 ta:
-  # RSI
   rsi_period: 14
-  rsi_buy_threshold: 45       # Mais fácil de comprar
-  rsi_sell_threshold: 55      # Mais fácil de vender
-  rsi_confidence: 0.50
-  
-  # Médias móveis
-  sma_short_period: 9
-  sma_long_period: 20
-  ema_short_period: 9
-  ema_long_period: 20
-  sma_cross_confidence: 0.50
-  
-  # Bollinger Bands
+  rsi_buy_threshold: 30
+  rsi_sell_threshold: 70
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
   bb_period: 20
-  bb_std_dev: 2.0
-  bb_confidence: 0.50
-  
-  # Pattern Detection
-  pattern_confidence: 0.50
-  
-  # Thresholds para decisão final
-  buy_threshold: 0.05
-  sell_threshold: 0.05
+  bb_std: 2.0
+  ema_short: 9
+  ema_long: 21
+  atr_period: 14
+  momentum_period: 10
 
-filters:
-  min_volume_multiplier: 0.1     # Permite operar com volume reduzido
-  max_recent_volatility: 0.50
-  
-  # NOVOS FILTROS DE SINAIS
-  min_imbalance: 0.75           # Imbalance mínimo de 75% para considerar
-  min_volume_usd: 50000         # Volume mínimo de $50k
-  whale_trade_threshold: 100000  # Trade > $100k é whale
+# Machine Learning
+ml:
+  features:
+    - rsi
+    - macd
+    - macd_signal
+    - bb_upper
+    - bb_lower
+    - bb_middle
+    - volume_ratio
+    - price_change
+    - volatility
+    - momentum
+    - support
+    - resistance
+    - trend_strength
+    - volume_profile
+    - ema_diff
+    - atr
+  lookback: 100
+  retrain_interval: 1000
+  model_type: gradient_boosting
+  test_size: 0.2
+  n_estimators: 100
 
-performance:
-  ta_interval_ms: 5000
-  main_loop_interval_ms: 1000
-  
-  # NOVO - Intervalos de verificação
-  check_positions_interval: 2000  # Verifica posições a cada 2 segundos
-  checkpoint_interval: 300        # Salva checkpoint a cada 5 minutos
+# WebSocket Configuration
+websocket:
+  buffer_size: 1000
+  reconnect_delay: 5
+  ping_interval: 30
+  streams:
+    - trade
+    - depth20@100ms
+    - kline_1m
 
-# NOVA SEÇÃO - Sistema
+# System Configuration
 system:
-  loop_interval: 1              # Intervalo do loop principal em segundos
-  enable_alerts: true           # Habilita sistema de alertas
-  save_trade_history: true      # Salva histórico de trades
-  
-# NOVA SEÇÃO - Estatísticas
-statistics:
-  track_performance: true       # Rastreia performance detalhada
-  log_interval: 60             # Loga estatísticas a cada 60 segundos
-  save_metrics: true           # Salva métricas em arquivo
+  log_level: INFO
+  checkpoint_interval: 300
+  health_check_interval: 60
+  cache_ttl: 60
+  rate_limit_per_minute: 1200
 
-# CONFIGURAÇÕES PARA MODO DEBUG
-# Estas configurações são mais agressivas para testes
-debug_overrides:
-  stop_loss_pct: 1.0          # Stop loss menor para debug (1%)
-  take_profit_pct: 1.5        # Take profit menor para debug (1.5%)
-  signal_cooldown: 30         # Apenas 30s entre trades em debug
-  min_confidence: 0.30        # Confiança ainda menor em debug
+# Alerts Configuration
+alerts:
+  telegram_enabled: true
+  telegram_token: ""  # Definir via TELEGRAM_BOT_TOKEN env var
+  telegram_chat_id: ""  # Definir via TELEGRAM_CHAT_ID env var
+  email_enabled: false
+  email_smtp: ""
+  email_from: ""
+  email_to: ""
