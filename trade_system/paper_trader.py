@@ -3,7 +3,7 @@
 import json
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Dict, List, Generator, Any
+from typing import Any, Dict, Generator, List
 import logging
 import random
 import requests

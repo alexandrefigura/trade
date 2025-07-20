@@ -1,7 +1,7 @@
 """Sistema de gestão de risco"""
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Tuple, Optional, Any
+from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 class RiskManager:

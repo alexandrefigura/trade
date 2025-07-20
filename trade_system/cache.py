@@ -2,11 +2,11 @@
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 import redis
 from collections import OrderedDict
 import pickle
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 class CacheManager:
     """Gerenciador de cache com Redis e fallback local"""

@@ -2,11 +2,12 @@
 Funções utilitárias genéricas
 """
 import numpy as np
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
-from trade_system.logging_config import get_logger
+from trade_system.logging_config import logging
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def calculate_atr(

@@ -2,7 +2,7 @@
 import time
 import logging
 from collections import deque
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 import asyncio
 
 class RateLimiter:

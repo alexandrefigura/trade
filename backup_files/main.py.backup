@@ -18,7 +18,7 @@ from trade_system.rate_limiter import RateLimiter
 from trade_system.alerts import AlertManager
 from trade_system.websocket_manager import WebSocketManager
 from trade_system.analysis.technical import TechnicalAnalyzer
-from trade_system.analysis.orderbook import OrderbookAnalyzer
+from trade_system.analysis.orderbook import ParallelOrderbookAnalyzer
 from trade_system.analysis.ml import SimplifiedMLPredictor
 from trade_system.risk import RiskManager
 from trade_system.validation import MarketConditionValidator
@@ -42,8 +42,8 @@ class TradingSystem:
         self.ws_manager = WebSocketManager(self.config, self.cache)
 
         # Módulos de análise
-        self.technical_analyzer = TechnicalAnalysis(self.config)
-        self.orderbook_analyzer = OrderbookAnalyzer(self.config)
+        self.technical_analyzer = UltraFastTechnicalAnalysis(self.config)
+        self.orderbook_analyzer = ParallelOrderbookAnalyzer(self.config)
         self.ml_predictor = SimplifiedWebSocketManager()
         self.signal_consolidator = OptimizedSignalConsolidator()
 

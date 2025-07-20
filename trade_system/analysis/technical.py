@@ -4,7 +4,7 @@ import pandas as pd
 import talib
 from numba import jit, prange
 import logging
-from typing import Dict, Any, Tuple, Optional
+from typing import Any, Dict, Optional, Tuple
 
 @jit(nopython=True)
 def calculate_rsi_fast(prices: np.ndarray, period: int = 14) -> np.ndarray:
@@ -310,3 +310,5 @@ class TechnicalAnalyzer:
             'indicators': {},
             'price': 0.0
         }
+
+UltraFastTechnicalAnalyzer = TechnicalAnalyzer

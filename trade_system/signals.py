@@ -1,6 +1,6 @@
 """Agregador de sinais de múltiplas fontes"""
 import logging
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 import numpy as np
 
 class SignalAggregator:

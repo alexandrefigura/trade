@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, precision_score, recall_score
 import joblib
 import logging
-from typing import Dict, Tuple, List, Optional, Any
+from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
 class MLPredictor:
@@ -271,3 +271,7 @@ class MLPredictor:
         """Verifica se deve retreinar o modelo"""
         retrain_interval = self.config.get('retrain_interval', 1000)
         return trades_count % retrain_interval == 0
+
+
+# Alias para compatibilidade
+SimplifiedMLPredictor = MLPredictor

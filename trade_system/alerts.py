@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import aiohttp
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart

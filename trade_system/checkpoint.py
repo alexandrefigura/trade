@@ -4,7 +4,7 @@ import logging
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 import pickle
 import gzip
 

@@ -4,7 +4,7 @@ import numpy as np
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 import aiohttp
 
 from trade_system.analysis.technical import TechnicalAnalyzer
