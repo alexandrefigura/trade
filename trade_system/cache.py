@@ -132,3 +132,6 @@ class CacheManager:
                 pass
         
         return stats
+
+# Alias para compatibilidade
+UltraFastCache = CacheManager

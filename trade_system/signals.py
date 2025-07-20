@@ -171,3 +171,6 @@ class SignalAggregator:
         """Atualiza pesos baseado em performance"""
         # TODO: Implementar ajuste adaptativo de pesos
         pass
+
+# Alias para compatibilidade
+OptimizedSignalConsolidator = SignalAggregator

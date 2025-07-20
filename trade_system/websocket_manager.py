@@ -109,3 +109,6 @@ class WebSocketManager:
             'vwap': self.get_latest_price() or 0,
             'trade_count': len(self.trade_buffer)
         }
+
+# Alias para compatibilidade
+UltraFastWebSocketManager = WebSocketManager

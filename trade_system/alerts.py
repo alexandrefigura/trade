@@ -167,3 +167,6 @@ class AlertManager:
             stats[alert_type] = stats.get(alert_type, 0) + 1
         
         return stats
+
+# Alias para compatibilidade
+AlertSystem = AlertManager
