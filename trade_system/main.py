@@ -42,7 +42,7 @@ class TradingSystem:
         self.ws_manager = WebSocketManager(self.config)
 
         # Módulos de análise
-        self.technical_analyzer = TechnicalAnalysis(self.config)
+        self.technical_analyzer = TechnicalAnalyzer(self.config)
         self.orderbook_analyzer = OrderbookAnalyzer(self.config)
         self.ml_predictor = SimplifiedWebSocketManager()
         self.signal_consolidator = OptimizedSignalConsolidator()
