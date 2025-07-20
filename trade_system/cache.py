@@ -6,6 +6,7 @@ from typing import Any, Optional
 import redis
 from collections import OrderedDict
 import pickle
+from typing import Dict, Any, Optional
 
 class CacheManager:
     """Gerenciador de cache com Redis e fallback local"""
