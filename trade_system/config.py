@@ -5,6 +5,11 @@ from typing import Any, Dict, List
 import yaml
 import json
 
+# Carregar variáveis de ambiente
+from dotenv import load_dotenv
+load_dotenv()
+
+
 @dataclass
 class TradingConfig:
     """Configuração do sistema de trading"""
