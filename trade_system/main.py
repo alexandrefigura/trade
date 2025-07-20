@@ -39,7 +39,7 @@ class TradingSystem:
         self.cache = CacheManager(self.config)
         self.rate_limiter = RateLimiter(self.config)
         self.alert_system = AlertManager(self.config)
-        self.ws_manager = WebSocketManager(self.config, self.cache)
+        self.ws_manager = WebSocketManager(self.config)
 
         # Módulos de análise
         self.technical_analyzer = TechnicalAnalysis(self.config)
@@ -495,7 +495,7 @@ async def run_paper_trading(
 ):
     """Ponto de entrada para paper trading com configurações aprimoradas"""
     setup_logging()
-    cfg = config or TradingConfig.from_env(debug_mode=debug_mode)
+    cfg = config or TradingConfig.from_env()
     cfg.debug_mode = debug_mode
 
     # Adiciona configurações de proteção se não existirem
