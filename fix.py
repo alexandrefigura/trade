@@ -1,4 +1,7 @@
-import click
+# fix.py - Salve este arquivo na raiz do projeto e execute
+import os
+
+cli_content = '''import click
 import os
 import sys
 import asyncio
@@ -68,3 +71,11 @@ def main():
 
 if __name__ == '__main__':
     main()
+'''
+
+# Cria o arquivo
+with open('trade_system/cli.py', 'w', encoding='utf-8') as f:
+    f.write(cli_content)
+
+print("✅ Arquivo cli.py criado com sucesso!")
+print("Agora você pode testar com: python -m trade_system.cli test-connection")

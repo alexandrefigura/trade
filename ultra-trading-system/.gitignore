@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+env/
+.venv
+
+# Project
+logs/
+*.log
+data/historical/*.csv
+data/checkpoints/*.pkl
+.env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
