@@ -44,7 +44,7 @@ class TradingSystem:
         # Módulos de análise
         self.technical_analyzer = TechnicalAnalyzer(self.config)
         self.orderbook_analyzer = OrderbookAnalyzer(self.config)
-        self.ml_predictor = SimplifiedMLPredictor()
+        self.ml_predictor = SimplifiedWebSocketManager()
         self.signal_consolidator = OptimizedSignalConsolidator()
 
         # Gestão de risco e validação de mercado
