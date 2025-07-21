@@ -369,4 +369,8 @@ def main():
     print("   - Alert System")
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     main()
+=======
+    main()
+>>>>>>> b7cd768e00fe8b178cb464118735e229e288c012
